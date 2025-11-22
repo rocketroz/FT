@@ -1,0 +1,7 @@
+{
+  "name": "Fit Twin",
+  "description": "AI-powered body measurement tool using computer vision and generative AI estimation.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
