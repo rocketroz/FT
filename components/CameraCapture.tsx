@@ -1,5 +1,6 @@
+
 import React, { useRef, useState, useCallback, useEffect } from 'react';
-import { ArrowLeft, Camera, Volume2, VolumeX, Upload, Image as ImageIcon, X, Check, Info, AlertTriangle, SwitchCamera } from 'lucide-react';
+import { ArrowLeft, Camera, Volume2, VolumeX, Upload, Image as ImageIcon, X, Check, Info, AlertTriangle, SwitchCamera, Timer } from 'lucide-react';
 import { CaptureMetadata } from '../types';
 
 interface Props {
@@ -20,6 +21,7 @@ export const CameraCapture: React.FC<Props> = ({ onCapture, onBack, mode }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
   
   // Refs to track component state for async operations
   const sequenceStartedRef = useRef(false);
@@ -35,6 +37,7 @@ export const CameraCapture: React.FC<Props> = ({ onCapture, onBack, mode }) => {
   // Camera State
   const [countdown, setCountdown] = useState<number | null>(null);
   const [audioEnabled, setAudioEnabled] = useState(true);
+  const [flash, setFlash] = useState(false);
 
   // Upload State
   const [uploadedImage, setUploadedImage] = useState<string | null>(null);
@@ -45,8 +48,16 @@ export const CameraCapture: React.FC<Props> = ({ onCapture, onBack, mode }) => {
   // Mount tracking
   useEffect(() => {
     isMountedRef.current = true;
+    // Initialize Audio Context on mount (requires interaction to unlock usually, but good to prep)
+    const AudioContext = window.AudioContext || (window as any).webkitAudioContext;
+    audioContextRef.current = new AudioContext();
+
     return () => {
       isMountedRef.current = false;
+      window.speechSynthesis.cancel();
+      if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
+        audioContextRef.current.close();
+      }
     };
   }, []);
 
@@ -69,29 +80,104 @@ export const CameraCapture: React.FC<Props> = ({ onCapture, onBack, mode }) => {
   }, []);
 
   // ----------------------------------------------------------------------
+  // Audio Logic
+  // ----------------------------------------------------------------------
+
+  const resumeAudioContext = useCallback(() => {
+    if (audioContextRef.current && audioContextRef.current.state === 'suspended') {
+      audioContextRef.current.resume();
+    }
+  }, []);
+
+  const playBeep = useCallback((frequency = 800, type: OscillatorType = 'sine', duration = 0.1) => {
+    if (!audioEnabled || !audioContextRef.current) return;
+    
+    resumeAudioContext();
+    
+    const osc = audioContextRef.current.createOscillator();
+    const gain = audioContextRef.current.createGain();
+    
+    osc.connect(gain);
+    gain.connect(audioContextRef.current.destination);
+    
+    osc.type = type;
+    osc.frequency.value = frequency;
+    gain.gain.setValueAtTime(0.1, audioContextRef.current.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, audioContextRef.current.currentTime + duration);
+    
+    osc.start();
+    osc.stop(audioContextRef.current.currentTime + duration);
+  }, [audioEnabled, resumeAudioContext]);
+
+  const playShutterSound = useCallback(() => {
+    if (!audioEnabled) return;
+    
+    // Play a generated 'camera click' sound which is more reliable than loading external files
+    if (audioContextRef.current) {
+      resumeAudioContext();
+      const t = audioContextRef.current.currentTime;
+      const osc = audioContextRef.current.createOscillator();
+      const gain = audioContextRef.current.createGain();
+      
+      osc.connect(gain);
+      gain.connect(audioContextRef.current.destination);
+      
+      // Simulating a mechanical shutter noise with noise buffer would be complex, 
+      // sticking to a high-freq crisp beep followed by a low thud.
+      
+      osc.frequency.setValueAtTime(1200, t);
+      osc.frequency.exponentialRampToValueAtTime(100, t + 0.1);
+      
+      gain.gain.setValueAtTime(0.5, t);
+      gain.gain.exponentialRampToValueAtTime(0.01, t + 0.1);
+      
+      osc.start(t);
+      osc.stop(t + 0.15);
+    }
+  }, [audioEnabled, resumeAudioContext]);
+
+  const speak = useCallback((text: string, force = false): Promise<void> => {
+    if (!audioEnabled && !force) return Promise.resolve();
+
+    return new Promise((resolve) => {
+      window.speechSynthesis.cancel(); 
+      const utterance = new SpeechSynthesisUtterance(text);
+      utterance.rate = 1.0; 
+      utterance.pitch = 1.1; // Slightly higher pitch is clearer
+      utterance.volume = 1.0;
+      
+      utterance.onend = () => resolve();
+      utterance.onerror = () => resolve(); // Always resolve
+      
+      if (isMountedRef.current) {
+        window.speechSynthesis.speak(utterance);
+      } else {
+        resolve();
+      }
+    });
+  }, [audioEnabled]);
+
+  // ----------------------------------------------------------------------
   // Camera Logic
   // ----------------------------------------------------------------------
 
   const startCamera = useCallback(async () => {
     if (captureMethod !== 'camera') return;
 
-    // Clean up previous stream if exists to prevent conflicts
+    // Clean up previous stream
     if (streamRef.current) {
       const tracks = streamRef.current.getTracks();
       tracks.forEach(track => track.stop());
       streamRef.current = null;
-      if (videoRef.current) {
-        videoRef.current.srcObject = null;
-      }
     }
 
     try {
+      // Prioritize "environment" (rear) camera as it's higher quality for body scans
       const constraints: MediaStreamConstraints = {
         video: { 
           facingMode: facingMode,
-          width: { ideal: 3840 }, // Request 4K if available, fall back gracefully
+          width: { ideal: 3840 }, 
           height: { ideal: 2160 },
-          // Attempt to request continuous focus in initial constraints (supported by some browsers)
           // @ts-ignore
           focusMode: 'continuous' 
         } 
@@ -104,23 +190,16 @@ export const CameraCapture: React.FC<Props> = ({ onCapture, onBack, mode }) => {
         return;
       }
 
-      // --- ADVANCED FOCUS LOGIC ---
-      // Try to apply continuous focus if the device supports it
+      // Try advanced focus
       const videoTrack = mediaStream.getVideoTracks()[0];
-      
-      // Check capabilities safely
       if (typeof videoTrack.getCapabilities === 'function') {
         const capabilities = videoTrack.getCapabilities();
-        // @ts-ignore: focusMode is not in standard TS definition yet for all browsers
+        // @ts-ignore
         if (capabilities.focusMode && Array.isArray(capabilities.focusMode) && capabilities.focusMode.includes('continuous')) {
           try {
-            await videoTrack.applyConstraints({
-              advanced: [{ focusMode: 'continuous' } as any]
-            });
-            console.log("Continuous autofocus enabled");
-          } catch (focusErr) {
-            console.log("Could not apply focus constraint", focusErr);
-          }
+            // @ts-ignore
+            await videoTrack.applyConstraints({ advanced: [{ focusMode: 'continuous' }] });
+          } catch (e) { console.log(e) }
         }
       }
 
@@ -142,7 +221,6 @@ export const CameraCapture: React.FC<Props> = ({ onCapture, onBack, mode }) => {
     if (captureMethod === 'camera') {
       startCamera();
     } else {
-      // Stop camera if switching to upload
       if (streamRef.current) {
         streamRef.current.getTracks().forEach(track => track.stop());
         streamRef.current = null;
@@ -150,10 +228,6 @@ export const CameraCapture: React.FC<Props> = ({ onCapture, onBack, mode }) => {
       }
       setIsCameraReady(false);
     }
-    
-    return () => {
-      // Clean up handled by startCamera logic or component unmount
-    };
   }, [captureMethod, startCamera]);
 
   const handleVideoCanPlay = () => {
@@ -162,59 +236,24 @@ export const CameraCapture: React.FC<Props> = ({ onCapture, onBack, mode }) => {
 
   const toggleCamera = () => {
     setFacingMode(prev => prev === 'environment' ? 'user' : 'environment');
-    // Reset any ongoing countdowns
     setCountdown(null);
     window.speechSynthesis.cancel();
     sequenceStartedRef.current = false;
   };
 
-  const speak = useCallback((text: string): Promise<void> => {
-    if (!audioEnabled) return Promise.resolve();
-
-    return new Promise((resolve) => {
-      window.speechSynthesis.cancel(); // Cancel any previous speech immediately
-      const utterance = new SpeechSynthesisUtterance(text);
-      utterance.rate = 1.0;
-      utterance.onend = () => resolve();
-      // Handle error/cancel cases to ensure promise resolves
-      utterance.onerror = () => resolve();
-      
-      if (isMountedRef.current) {
-        window.speechSynthesis.speak(utterance);
-      } else {
-        resolve();
-      }
-    });
-  }, [audioEnabled]);
-
-  const playShutterSound = useCallback(() => {
-    if (!audioEnabled) return;
-    try {
-      const audio = new Audio(SHUTTER_SOUND);
-      const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      osc.connect(gain);
-      gain.connect(ctx.destination);
-      osc.type = 'square';
-      osc.frequency.value = 800;
-      gain.gain.exponentialRampToValueAtTime(0.00001, ctx.currentTime + 0.1);
-      osc.start();
-      osc.stop(ctx.currentTime + 0.1);
-    } catch (e) {
-      console.error("Audio play failed", e);
-    }
-  }, [audioEnabled]);
-
   const takePhoto = useCallback(() => {
     if (videoRef.current && canvasRef.current && isMountedRef.current) {
+      // 1. Audio Feedback
       playShutterSound();
+      
+      // 2. Visual Feedback (Flash)
+      setFlash(true);
+      setTimeout(() => setFlash(false), 300);
+
       setCountdown(null);
       
       const video = videoRef.current;
       const canvas = canvasRef.current;
-      
-      // Flip context horizontally if using front camera for natural mirror effect
       const isMirrored = facingMode === 'user';
 
       canvas.width = video.videoWidth;
@@ -227,22 +266,13 @@ export const CameraCapture: React.FC<Props> = ({ onCapture, onBack, mode }) => {
           ctx.scale(-1, 1);
         }
         ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-        const imageBase64 = canvas.toDataURL('image/jpeg', 0.95); // Higher quality for analysis
+        const imageBase64 = canvas.toDataURL('image/jpeg', 0.95);
         
-        // Gather Metadata
+        // Metadata
         let deviceLabel = 'unknown';
-        let trackSettings: MediaTrackSettings | undefined = undefined;
-        let capabilities: MediaTrackCapabilities | undefined = undefined;
-
         if (streamRef.current) {
           const track = streamRef.current.getVideoTracks()[0];
-          if (track) {
-            deviceLabel = track.label;
-            trackSettings = track.getSettings();
-            if (typeof track.getCapabilities === 'function') {
-              capabilities = track.getCapabilities();
-            }
-          }
+          if (track) deviceLabel = track.label;
         }
 
         const metadata: CaptureMetadata = {
@@ -252,11 +282,12 @@ export const CameraCapture: React.FC<Props> = ({ onCapture, onBack, mode }) => {
           userAgent: navigator.userAgent,
           timestamp: new Date().toISOString(),
           screenResolution: `${window.screen.width}x${window.screen.height}`,
-          cameraSettings: trackSettings,
-          capabilities: capabilities
         };
 
-        onCapture(imageBase64, metadata);
+        // Small delay to allow flash to render before moving on
+        setTimeout(() => {
+          onCapture(imageBase64, metadata);
+        }, 400);
       }
     }
   }, [onCapture, playShutterSound, facingMode]);
@@ -264,50 +295,57 @@ export const CameraCapture: React.FC<Props> = ({ onCapture, onBack, mode }) => {
   const startCaptureSequence = useCallback(async () => {
     if (sequenceStartedRef.current) return;
     sequenceStartedRef.current = true;
+    resumeAudioContext(); // Ensure audio is unlocked
+
+    // --- PHASE 1: PREPARATION ---
+    const prepDuration = 10; // Give them 10 seconds to walk back
+    setCountdown(prepDuration);
 
     if (mode === 'front') {
-      await speak("Step back. Arms 45 degrees out. A-Pose.");
-      if (!isMountedRef.current) return;
-      await speak("3... 2... 1...");
+      await speak("Place phone at waist height. Step back. Face camera. Arms out.");
     } else {
-      await speak("Turn left 90 degrees. Arms by sides. 3... 2... 1...");
+      await speak("Turn 90 degrees left. Arms by side. Look straight ahead.");
     }
     
     if (!isMountedRef.current) return;
 
-    let count = 3;
-    setCountdown(count);
-
-    const interval = setInterval(() => {
-      if (!isMountedRef.current) {
-        clearInterval(interval);
-        return;
-      }
+    // --- PHASE 2: COUNTDOWN ---
+    let remaining = prepDuration;
+    
+    // We use a recursive timeout pattern for better control than setInterval with async speech
+    const tick = async () => {
+      if (!isMountedRef.current) return;
       
-      count--;
-      setCountdown(count);
+      setCountdown(remaining);
       
-      if (count === 0) {
-        clearInterval(interval);
+      if (remaining > 3) {
+        // Just a beep for early countdown
+        playBeep(800, 'sine', 0.1); 
+      } else if (remaining > 0) {
+        // Voice for 3, 2, 1
+        playBeep(1200, 'square', 0.1); // High pitch alert
+        if (remaining === 3) speak("Three");
+        if (remaining === 2) speak("Two");
+        if (remaining === 1) speak("One");
+      } else if (remaining === 0) {
+        // Final moment
+        await speak("Hold still");
+        if (!isMountedRef.current) return;
         takePhoto();
         sequenceStartedRef.current = false;
+        return; // Stop recursion
       }
-    }, 1000);
-  }, [mode, speak, takePhoto]);
 
-  // Auto-start sequence when in side mode and CAMERA IS READY
-  useEffect(() => {
-    if (
-      mode === 'side' && 
-      captureMethod === 'camera' && 
-      isCameraReady && 
-      !autoStartTriggeredRef.current
-    ) {
-      autoStartTriggeredRef.current = true;
-      startCaptureSequence();
-    }
-  }, [mode, captureMethod, isCameraReady, startCaptureSequence]);
+      remaining--;
+      setTimeout(tick, 1000);
+    };
 
+    tick();
+
+  }, [mode, speak, takePhoto, playBeep, resumeAudioContext]);
+
+  // Auto-start side mode if requested logic is active (optional, currently manual start is safer for audio)
+  
   // ----------------------------------------------------------------------
   // Upload Logic
   // ----------------------------------------------------------------------
@@ -338,30 +376,21 @@ export const CameraCapture: React.FC<Props> = ({ onCapture, onBack, mode }) => {
   };
 
   // ----------------------------------------------------------------------
-  // Visual Assets (Mannequins)
+  // Visual Assets
   // ----------------------------------------------------------------------
 
   const MannequinFront = () => (
     <g>
-      {/* Body Fill */}
       <path d={PATH_FRONT} fill="#94a3b8" />
-      {/* Orange Center Line */}
       <line x1="43" y1="12" x2="43" y2="190" stroke="#f97316" strokeWidth="1" strokeDasharray="4 2" />
-      
-      {/* Key Landmark Lines */}
       <line x1="31" y1="32" x2="55" y2="32" stroke="#cbd5e1" strokeWidth="0.5" />
-      <line x1="28" y1="52" x2="58" y2="52" stroke="#cbd5e1" strokeWidth="0.5" />
-      <line x1="30" y1="85" x2="56" y2="85" stroke="#cbd5e1" strokeWidth="0.5" />
     </g>
   );
 
   const MannequinSide = () => (
     <g>
-      {/* Body Fill */}
       <path d={PATH_SIDE} fill="#94a3b8" />
-       {/* Arm at side */}
       <path d={PATH_SIDE_ARM} fill="#64748b" />
-      {/* Orange Center Line (Side view spine approximation) */}
       <line x1="49" y1="12" x2="49" y2="190" stroke="#f97316" strokeWidth="1" strokeDasharray="4 2" />
     </g>
   );
@@ -369,6 +398,9 @@ export const CameraCapture: React.FC<Props> = ({ onCapture, onBack, mode }) => {
   return (
     <div className="fixed inset-0 bg-slate-900 flex flex-col z-50">
       
+      {/* Flash Overlay */}
+      <div className={`absolute inset-0 z-[100] bg-white pointer-events-none transition-opacity duration-300 ${flash ? 'opacity-100' : 'opacity-0'}`} />
+
       {/* --- Header --- */}
       <div className="absolute top-0 left-0 right-0 p-4 flex justify-between items-center z-20 bg-gradient-to-b from-black/80 to-transparent pointer-events-none">
         <div className="pointer-events-auto flex gap-2">
@@ -376,7 +408,6 @@ export const CameraCapture: React.FC<Props> = ({ onCapture, onBack, mode }) => {
             <ArrowLeft size={24} />
           </button>
           
-          {/* Mode Toggle */}
           <div className="flex bg-black/50 backdrop-blur-md rounded-full p-1 border border-white/10">
             <button 
               onClick={() => setCaptureMethod('camera')}
@@ -435,7 +466,8 @@ export const CameraCapture: React.FC<Props> = ({ onCapture, onBack, mode }) => {
                   onCanPlay={handleVideoCanPlay}
                   className={`absolute inset-0 w-full h-full object-cover ${facingMode === 'user' ? 'scale-x-[-1]' : ''}`}
                 />
-                {/* AR Mask Overlay (Inverted Cutout) */}
+                
+                {/* AR Mask Overlay */}
                 <div className="absolute inset-0 pointer-events-none">
                   <svg className="w-full h-full" viewBox="0 0 100 200" preserveAspectRatio="none">
                     <path
@@ -443,7 +475,6 @@ export const CameraCapture: React.FC<Props> = ({ onCapture, onBack, mode }) => {
                       fill="rgba(0, 0, 0, 0.65)" 
                       fillRule="evenodd"
                     />
-                    
                     <path 
                       d={mode === 'front' ? PATH_FRONT : PATH_SIDE}
                       fill="none" 
@@ -452,28 +483,30 @@ export const CameraCapture: React.FC<Props> = ({ onCapture, onBack, mode }) => {
                       strokeDasharray="4 2"
                       className="drop-shadow-md"
                     />
-                    
-                    <line 
-                      x1="50" y1="0" 
-                      x2="50" y2="200" 
-                      stroke="rgba(255,255,255,0.4)" 
-                      strokeWidth="0.5" 
-                      strokeDasharray="2 2" 
-                    />
                   </svg>
                 </div>
 
-                {/* Instruction Text Overlay */}
-                <div className="absolute bottom-32 left-0 right-0 text-center z-20">
-                  <span className="inline-block bg-black/50 backdrop-blur-sm text-white px-4 py-2 rounded-full text-sm font-bold border border-white/10 shadow-lg">
-                     {mode === 'front' ? 'Align body inside the shape' : 'Align side profile inside the shape'}
-                  </span>
+                {/* Status / Instructions */}
+                <div className="absolute bottom-32 left-0 right-0 text-center z-20 px-4">
+                  {countdown === null ? (
+                     <div className="inline-block bg-black/60 backdrop-blur-md text-white px-6 py-3 rounded-2xl border border-white/10 shadow-lg">
+                        <p className="font-bold text-lg mb-1">{mode === 'front' ? 'Front A-Pose' : 'Side Profile'}</p>
+                        <p className="text-sm text-slate-300">
+                          {mode === 'front' ? 'Arms out 45°. Feet shoulder width.' : 'Turn 90°. Arms by sides.'}
+                        </p>
+                     </div>
+                  ) : (
+                     <div className="inline-block bg-blue-600/90 backdrop-blur-md text-white px-8 py-4 rounded-2xl shadow-xl animate-pulse">
+                        <p className="text-xs font-bold uppercase tracking-widest mb-1">Get in position</p>
+                        <p className="text-4xl font-black">{countdown}</p>
+                     </div>
+                  )}
                 </div>
 
-                {/* Countdown */}
-                {countdown !== null && (
-                  <div className="absolute inset-0 flex items-center justify-center bg-black/40 backdrop-blur-sm z-30">
-                    <div className="text-9xl font-bold text-white animate-pulse">
+                {/* Big Center Countdown */}
+                {countdown !== null && countdown <= 3 && countdown > 0 && (
+                  <div className="absolute inset-0 flex items-center justify-center bg-black/20 backdrop-blur-sm z-30">
+                    <div className="text-[12rem] font-black text-white drop-shadow-2xl animate-bounce">
                       {countdown}
                     </div>
                   </div>
@@ -486,185 +519,33 @@ export const CameraCapture: React.FC<Props> = ({ onCapture, onBack, mode }) => {
         {/* --- UPLOAD VIEW --- */}
         {captureMethod === 'upload' && (
           <div className="w-full h-full bg-slate-900 flex flex-col items-center justify-center p-6 overflow-y-auto">
-            
             {!uploadedImage ? (
               <div className="max-w-md w-full space-y-6 mt-12">
-                {/* Reference Guide */}
-                <div className="bg-slate-800 rounded-2xl p-5 border border-slate-700 shadow-xl">
-                   <div className="flex items-center gap-3 mb-4 border-b border-slate-700 pb-3">
-                      <div className="bg-blue-500/20 p-2 rounded-lg text-blue-400">
-                        <ImageIcon size={20} />
-                      </div>
-                      <div>
-                        <h3 className="text-white font-bold">Reference Pose</h3>
-                        <p className="text-xs text-slate-400">Match this sample exactly</p>
-                      </div>
-                   </div>
-                   
-                   <div className="flex gap-6">
-                      <div className="w-32 h-48 bg-slate-900 rounded-lg border border-slate-600 relative overflow-hidden">
-                         <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,_var(--tw-gradient-stops))] from-slate-800 to-slate-900"></div>
-                         <svg viewBox="0 0 86 200" className="h-full w-full p-2 relative z-10">
-                            {mode === 'front' ? <MannequinFront /> : <MannequinSide />}
-                         </svg>
-                         <div className="absolute bottom-2 left-0 right-0 text-center">
-                            <span className="text-[10px] font-bold bg-black/50 text-white px-2 py-1 rounded-full border border-white/10">
-                              {mode === 'front' ? 'A-POSE' : 'SIDE PROFILE'}
-                            </span>
-                         </div>
-                      </div>
-                      
-                      <div className="flex-1 flex flex-col justify-center space-y-3">
-                        <div>
-                           <h4 className="text-slate-200 font-bold text-sm mb-1">Required Position</h4>
-                           <ul className="text-xs text-slate-400 space-y-1.5 list-disc pl-4">
-                            {mode === 'front' ? (
-                              <>
-                                <li>Arms 45° away from body</li>
-                                <li>Feet shoulder-width apart</li>
-                                <li>Wear fitted clothing</li>
-                                <li>Entire body in frame</li>
-                              </>
-                            ) : (
-                              <>
-                                <li>Stand perfectly sideways</li>
-                                <li>Arms relaxed at sides</li>
-                                <li>Feet together</li>
-                                <li>Look straight ahead</li>
-                              </>
-                            )}
-                           </ul>
-                        </div>
-                      </div>
-                   </div>
-                </div>
-
-                {/* Upload Area */}
-                <div 
-                  onClick={() => fileInputRef.current?.click()}
-                  className="group relative border-2 border-dashed border-slate-600 hover:border-blue-500 bg-slate-800/30 hover:bg-slate-800 rounded-2xl p-8 text-center cursor-pointer transition-all"
-                >
-                  <div className="absolute inset-0 bg-blue-500/5 opacity-0 group-hover:opacity-100 transition-opacity rounded-2xl" />
-                  <div className="w-14 h-14 bg-slate-700 group-hover:bg-blue-600 rounded-full flex items-center justify-center mx-auto mb-3 transition-colors text-white shadow-lg">
-                    <Upload size={28} />
-                  </div>
-                  <p className="text-white font-bold text-lg">Upload {mode === 'front' ? 'Front' : 'Side'} Photo</p>
-                  <p className="text-slate-400 text-sm mt-1">Tap to browse gallery</p>
-                </div>
-                <input 
-                  ref={fileInputRef}
-                  type="file" 
-                  accept="image/*" 
-                  onChange={handleFileUpload}
-                  className="hidden"
-                />
+                 <div onClick={() => fileInputRef.current?.click()} className="cursor-pointer bg-slate-800 p-8 rounded-2xl border-2 border-dashed border-slate-600 hover:border-blue-500 text-center transition-all">
+                    <Upload size={48} className="mx-auto text-slate-400 mb-4" />
+                    <p className="text-white font-bold">Select Photo</p>
+                    <p className="text-slate-400 text-sm">Tap to browse</p>
+                 </div>
+                 <input ref={fileInputRef} type="file" accept="image/*" onChange={handleFileUpload} className="hidden" />
               </div>
             ) : (
-              <div className="w-full h-full flex flex-col items-center justify-center animate-fade-in">
-                <div className="relative max-h-[65vh] w-full max-w-lg rounded-lg overflow-hidden shadow-2xl border border-slate-700 bg-black">
-                  <img src={uploadedImage} alt="Preview" className="w-full h-full object-contain" />
-                  <button 
-                    onClick={() => setUploadedImage(null)}
-                    className="absolute top-4 right-4 bg-black/60 text-white p-2 rounded-full hover:bg-red-600 transition-colors backdrop-blur-sm"
-                  >
-                    <X size={20} />
-                  </button>
-                </div>
-                
-                <div className="mt-6 flex flex-col w-full max-w-xs gap-3">
-                  <button 
-                    onClick={confirmUpload}
-                    className="w-full py-3.5 rounded-xl bg-blue-600 text-white font-bold hover:bg-blue-500 flex items-center justify-center gap-2 shadow-lg shadow-blue-900/20"
-                  >
-                    <Check size={20} /> Use This Photo
-                  </button>
-                  <button 
-                    onClick={() => setUploadedImage(null)}
-                    className="w-full py-3.5 rounded-xl bg-slate-800 text-slate-300 font-bold hover:bg-slate-700"
-                  >
-                    Choose Different Photo
-                  </button>
-                </div>
+              <div className="w-full h-full flex flex-col items-center">
+                 <img src={uploadedImage} alt="Preview" className="max-h-[70vh] object-contain mb-4" />
+                 <div className="flex gap-4">
+                    <button onClick={confirmUpload} className="bg-blue-600 text-white px-8 py-3 rounded-xl font-bold">Use Photo</button>
+                    <button onClick={() => setUploadedImage(null)} className="bg-slate-700 text-white px-8 py-3 rounded-xl">Retry</button>
+                 </div>
               </div>
             )}
           </div>
         )}
 
-        {/* --- HELP OVERLAY --- */}
-        {showGuide && (
-          <div className="absolute inset-0 z-40 bg-black/90 backdrop-blur-md p-6 flex items-center justify-center animate-fade-in">
-            <div className="max-w-sm w-full bg-slate-900 border border-slate-700 rounded-3xl p-6 relative shadow-2xl">
-               <button 
-                onClick={() => setShowGuide(false)} 
-                className="absolute top-4 right-4 text-slate-400 hover:text-white p-1 rounded-full hover:bg-white/10 transition-colors"
-              >
-                <X size={24} />
-              </button>
-              
-              <h3 className="text-xl font-bold text-white mb-1 text-center">Pose Guide</h3>
-              <p className="text-slate-400 text-xs text-center mb-6">Follow the mannequin exactly</p>
-              
-              <div className="flex justify-center mb-6">
-                <div className="w-40 h-64 bg-slate-800 rounded-2xl border border-slate-600 relative overflow-hidden shadow-inner">
-                   <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,_var(--tw-gradient-stops))] from-slate-800 to-black"></div>
-                  <svg viewBox="0 0 86 200" className="w-full h-full p-4 relative z-10">
-                    {mode === 'front' ? <MannequinFront /> : <MannequinSide />}
-                  </svg>
-                  
-                  {/* Dimensions / Lines overlay decoration */}
-                  <div className="absolute top-4 left-2 w-2 h-[1px] bg-blue-500"></div>
-                  <div className="absolute top-4 left-2 h-full w-[1px] bg-blue-500/30"></div>
-                  <div className="absolute bottom-4 right-2 w-2 h-[1px] bg-blue-500"></div>
-                </div>
-              </div>
-
-              <div className="space-y-4">
-                <div className="flex gap-3 items-start bg-slate-800/50 p-3 rounded-xl border border-slate-700/50">
-                  <div className="mt-0.5 bg-green-500/20 text-green-400 p-1.5 rounded-lg">
-                    <Check size={16} />
-                  </div>
-                  <div>
-                    <h4 className="text-white font-bold text-sm">Correct Posture</h4>
-                    <p className="text-slate-400 text-xs mt-1 leading-relaxed">
-                      {mode === 'front' 
-                        ? "Stand tall. Arms out at 45° (A-Pose). Feet shoulder-width apart. Wear tight clothes."
-                        : "Stand sideways. Feet together. Arms relaxed naturally at your side."}
-                    </p>
-                  </div>
-                </div>
-                
-                <div className="flex gap-3 items-start bg-slate-800/50 p-3 rounded-xl border border-slate-700/50">
-                  <div className="mt-0.5 bg-blue-500/20 text-blue-400 p-1.5 rounded-lg">
-                    <Camera size={16} />
-                  </div>
-                  <div>
-                    <h4 className="text-white font-bold text-sm">Camera Position</h4>
-                    <p className="text-slate-400 text-xs mt-1 leading-relaxed">
-                      Phone at waist height, held vertically. Ensure even lighting and no shadows.
-                    </p>
-                  </div>
-                </div>
-              </div>
-
-              <button 
-                onClick={() => setShowGuide(false)}
-                className="w-full mt-6 bg-white text-slate-900 font-bold py-3 rounded-xl hover:bg-slate-200 transition-colors"
-              >
-                I Understand
-              </button>
-            </div>
-          </div>
-        )}
-
       </div>
 
-      {/* --- Footer Controls (Only for Camera Mode) --- */}
+      {/* --- Footer Controls --- */}
       {captureMethod === 'camera' && (
         <div className="bg-slate-900 p-8 pb-12 flex justify-center items-center gap-8 z-20 border-t border-slate-800">
-          <button 
-            onClick={toggleCamera}
-            className="p-4 rounded-full bg-slate-800 text-white hover:bg-slate-700 transition-all"
-          >
+          <button onClick={toggleCamera} className="p-4 rounded-full bg-slate-800 text-white hover:bg-slate-700 transition-all">
             <SwitchCamera size={24} />
           </button>
 
@@ -672,19 +553,56 @@ export const CameraCapture: React.FC<Props> = ({ onCapture, onBack, mode }) => {
             onClick={startCaptureSequence}
             disabled={countdown !== null}
             className={`
-              w-20 h-20 rounded-full border-4 border-white flex items-center justify-center
+              w-24 h-24 rounded-full border-4 border-white flex flex-col items-center justify-center
               transition-all transform active:scale-95 shadow-lg shadow-blue-900/50
               ${countdown !== null ? 'bg-red-500 border-red-300' : 'bg-blue-600 border-white hover:bg-blue-500'}
             `}
           >
-            <Camera size={32} className="text-white" />
+            {countdown !== null ? (
+               <span className="text-2xl font-bold text-white">{countdown}</span>
+            ) : (
+               <>
+                 <Camera size={32} className="text-white mb-1" />
+                 <span className="text-[10px] font-bold text-blue-100 uppercase tracking-wider">Start</span>
+               </>
+            )}
           </button>
           
-          <div className="w-14"></div> 
+          <button 
+             onClick={() => setShowGuide(true)}
+             className="p-4 rounded-full bg-slate-800 text-slate-400 hover:text-white hover:bg-slate-700 transition-all"
+          >
+            <Info size={24} />
+          </button>
         </div>
       )}
 
+      {/* Hidden Canvas for Capture */}
       <canvas ref={canvasRef} className="hidden" />
+
+      {/* --- Help Overlay --- */}
+      {showGuide && (
+         <div className="absolute inset-0 z-50 bg-black/90 backdrop-blur-md p-6 flex items-center justify-center animate-fade-in">
+            <div className="max-w-sm w-full bg-slate-900 rounded-3xl p-6 relative">
+               <button onClick={() => setShowGuide(false)} className="absolute top-4 right-4 text-white"><X /></button>
+               <h3 className="text-xl font-bold text-white mb-4 text-center">How to Capture</h3>
+               <div className="flex justify-center mb-6">
+                  <div className="w-32 h-48 bg-slate-800 rounded-lg p-2 border border-slate-700">
+                     <svg viewBox="0 0 86 200" className="w-full h-full">
+                        {mode === 'front' ? <MannequinFront /> : <MannequinSide />}
+                     </svg>
+                  </div>
+               </div>
+               <ul className="text-slate-300 text-sm space-y-3 list-disc pl-5">
+                  <li>Use the <b>Timer</b> to get in position.</li>
+                  <li>Wait for the <b>Beeps</b> and Voice countdown.</li>
+                  <li>Stand back until your whole body fits the frame.</li>
+                  <li>Hold still when you hear "One".</li>
+               </ul>
+               <button onClick={() => setShowGuide(false)} className="w-full mt-6 bg-blue-600 py-3 rounded-xl text-white font-bold">Got it</button>
+            </div>
+         </div>
+      )}
     </div>
   );
 };

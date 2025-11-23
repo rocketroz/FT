@@ -30,7 +30,7 @@ export const AdminDashboard: React.FC<Props> = ({ onBack }) => {
     }
     // New structure stores full_json
     if (scan.full_json) return scan.full_json;
-    return scan.measurements;
+    return scan.measurements || {};
   };
 
   return (
@@ -117,6 +117,18 @@ export const AdminDashboard: React.FC<Props> = ({ onBack }) => {
                  </div>
                  
                  <div className="flex-1 overflow-y-auto p-6">
+                    
+                    {/* Schema Mismatch Warning */}
+                    {(!selectedScan.chest && selectedScan.parsed?.chest) && (
+                      <div className="mb-4 bg-amber-50 p-3 rounded-lg border border-amber-200 flex items-center gap-2 text-xs text-amber-800">
+                          <AlertTriangle size={14} />
+                          <span>
+                             <strong>Schema Mismatch Detected:</strong> Main columns (e.g., chest, waist) are empty in DB. Displaying data from JSON backup. 
+                             Check your Supabase column definitions.
+                          </span>
+                      </div>
+                    )}
+
                     <div className="grid grid-cols-2 gap-4 mb-6">
                        <div className="p-4 bg-slate-50 rounded-lg">
                           <h4 className="text-xs font-bold text-slate-400 uppercase mb-2">Metrics</h4>
@@ -129,8 +141,8 @@ export const AdminDashboard: React.FC<Props> = ({ onBack }) => {
                        <div className="p-4 bg-slate-50 rounded-lg">
                           <h4 className="text-xs font-bold text-slate-400 uppercase mb-2">Metadata</h4>
                           <div className="space-y-1 text-sm">
-                             <div className="flex justify-between"><span>Method:</span> <span className="text-slate-600">{selectedScan.capture_method}</span></div>
-                             <div className="flex justify-between"><span>Confidence:</span> <span className="text-slate-600">{selectedScan.confidence}%</span></div>
+                             <div className="flex justify-between"><span>Method:</span> <span className="text-slate-600">{selectedScan.capture_method || selectedScan.parsed.capture_method}</span></div>
+                             <div className="flex justify-between"><span>Confidence:</span> <span className="text-slate-600">{selectedScan.confidence || selectedScan.parsed.confidence}%</span></div>
                              
                              <div className="flex justify-between pt-2 mt-2 border-t border-slate-200">
                                <span>Model:</span> 
@@ -156,7 +168,7 @@ export const AdminDashboard: React.FC<Props> = ({ onBack }) => {
                        </div>
                     </div>
                     
-                    {/* Transparency Fields from DB columns */}
+                    {/* Transparency Fields from DB columns or JSON */}
                     <div className="mb-6 bg-slate-50 p-4 rounded-lg border border-slate-200">
                          <h4 className="text-xs font-bold text-blue-600 uppercase mb-3 flex items-center gap-2">
                            <FileText size={14}/> Technical Transparency
@@ -165,16 +177,16 @@ export const AdminDashboard: React.FC<Props> = ({ onBack }) => {
                         <div className="grid grid-cols-1 gap-2 text-sm">
                            <div className="flex justify-between border-b border-slate-200 pb-1">
                               <span className="text-slate-500">Scaling Factor:</span>
-                              <span className="font-mono">{selectedScan.scaling_factor}</span>
+                              <span className="font-mono">{selectedScan.scaling_factor || selectedScan.parsed.scaling_factor}</span>
                            </div>
                            <div className="flex justify-between border-b border-slate-200 pb-1">
                               <span className="text-slate-500">AI Est. Height:</span>
-                              <span className="font-mono">{selectedScan.estimated_height_cm} cm</span>
+                              <span className="font-mono">{selectedScan.estimated_height_cm || selectedScan.parsed.estimated_height_cm} cm</span>
                            </div>
-                           {selectedScan.thinking_tokens && (
+                           {(selectedScan.thinking_tokens || selectedScan.parsed.thinking_tokens || selectedScan.parsed.usage_metadata?.thinkingTokenCount) && (
                              <div className="flex justify-between border-b border-slate-200 pb-1">
                                 <span className="text-slate-500">Thinking Tokens:</span>
-                                <span className="font-mono text-amber-600">{selectedScan.thinking_tokens}</span>
+                                <span className="font-mono text-amber-600">{selectedScan.thinking_tokens || selectedScan.parsed.thinking_tokens || selectedScan.parsed.usage_metadata?.thinkingTokenCount}</span>
                              </div>
                            )}
                         </div>

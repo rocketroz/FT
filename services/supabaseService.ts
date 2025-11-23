@@ -80,7 +80,7 @@ const uploadFile = async (bucket: string, path: string, file: Blob): Promise<str
   if (!supabase) return null;
   const { data, error } = await supabase.storage.from(bucket).upload(path, file, { upsert: true });
   if (error) {
-    console.error(`Upload failed for ${path}`, error);
+    console.warn(`Upload failed for ${path} (bucket might not exist or permissions error). Continuing...`, error);
     return null;
   }
   const { data: urlData } = supabase.storage.from(bucket).getPublicUrl(path);
@@ -112,20 +112,26 @@ export const saveScanResult = async (
     const scanId = crypto.randomUUID(); // Client-side generated ID for relation linking
     const timestamp = Date.now();
 
-    // 1. Upload Files
-    const frontBlob = await base64ToBlob(images.front);
-    const sideBlob = await base64ToBlob(images.side);
-
-    const frontUrl = await uploadFile('scans', `${userId}/${scanId}/front_${timestamp}.jpg`, frontBlob);
-    const sideUrl = await uploadFile('scans', `${userId}/${scanId}/side_${timestamp}.jpg`, sideBlob);
-
+    // 1. Upload Files (Non-blocking: if these fail, we still try to save the record)
+    let frontUrl = null;
+    let sideUrl = null;
     let objUrl = null;
     let usdzUrl = null;
-    if (models.objBlob) objUrl = await uploadFile('scans', `${userId}/${scanId}/model_${timestamp}.obj`, models.objBlob);
-    if (models.usdzBlob) usdzUrl = await uploadFile('scans', `${userId}/${scanId}/model_${timestamp}.usdz`, models.usdzBlob);
+
+    try {
+      const frontBlob = await base64ToBlob(images.front);
+      const sideBlob = await base64ToBlob(images.side);
+      frontUrl = await uploadFile('scans', `${userId}/${scanId}/front_${timestamp}.jpg`, frontBlob);
+      sideUrl = await uploadFile('scans', `${userId}/${scanId}/side_${timestamp}.jpg`, sideBlob);
+
+      if (models.objBlob) objUrl = await uploadFile('scans', `${userId}/${scanId}/model_${timestamp}.obj`, models.objBlob);
+      if (models.usdzBlob) usdzUrl = await uploadFile('scans', `${userId}/${scanId}/model_${timestamp}.usdz`, models.usdzBlob);
+    } catch (uploadErr) {
+      console.warn("File upload process had issues, proceeding to save record...", uploadErr);
+    }
 
     // Calculate approximate cost (Simulated)
-    const cost = (results.usage_metadata?.totalTokenCount || 0) * 0.000004; // $4 per 1M tokens approx for generic 2.5 input
+    const cost = (results.usage_metadata?.totalTokenCount || 0) * 0.000004;
 
     // Prepare JSON for landmarks (combining front and side)
     const landmarksJson = {
@@ -133,10 +139,13 @@ export const saveScanResult = async (
       side: results.landmarks_side || results.landmarks?.side
     };
 
-    // 2. Insert Main Measurement Record
-    const { data: measurementData, error: measurementError } = await supabase
-      .from('measurements')
-      .insert([{
+    // 2. Insert Main Measurement Record with FALLBACK STRATEGY
+    let measurementData = null;
+    let measurementError = null;
+
+    // ATTEMPT 1: Full Schema Insert
+    try {
+      const fullPayload = {
         id: scanId,
         user_id: user ? user.id : null,
         gender: stats.gender || 'Not Specified',
@@ -167,52 +176,93 @@ export const saveScanResult = async (
         token_count: results.usage_metadata?.totalTokenCount,
         thinking_tokens: results.usage_metadata?.thinkingTokenCount || null,
         api_cost_usd: cost
-      }])
-      .select()
-      .single();
+      };
+
+      const { data, error } = await supabase
+        .from('measurements')
+        .insert([fullPayload])
+        .select()
+        .single();
+      
+      measurementData = data;
+      measurementError = error;
+    } catch (e) {
+      measurementError = e;
+    }
+
+    // ATTEMPT 2: Fallback to Minimal Schema (if Full failed due to column mismatch)
+    if (measurementError) {
+      console.warn("Full insert failed (likely schema/column mismatch). Attempting minimal backup save.", measurementError);
+      
+      const backupPayload = {
+        id: scanId,
+        user_id: user ? user.id : null,
+        full_json: results,
+        // We include basic fields that nearly always exist
+        height: stats.height,
+        gender: stats.gender || 'Not Specified'
+      };
+
+      try {
+        const { data, error } = await supabase
+          .from('measurements')
+          .insert([backupPayload])
+          .select()
+          .single();
+          
+        measurementData = data;
+        measurementError = error; // Update error to the fallback result
+        if (!error) {
+          console.log("Fallback save successful.");
+        }
+      } catch (fallbackErr) {
+         measurementError = fallbackErr;
+      }
+    }
 
     if (measurementError) throw measurementError;
 
-    // 3. Insert Related Data (Parallel for speed)
-    const promises = [];
+    // 3. Insert Related Data (Auxiliary tables)
+    // We wrap these in try-catch so they don't block the main success if they fail
+    try {
+      const promises = [];
 
-    // Table: measurement_images
-    if (frontUrl) {
-      promises.push(supabase.from('measurement_images').insert({ measurement_id: scanId, view_type: 'front', public_url: frontUrl, storage_path: `${userId}/${scanId}/front.jpg` }));
+      // Table: measurement_images
+      if (frontUrl) promises.push(supabase.from('measurement_images').insert({ measurement_id: scanId, view_type: 'front', public_url: frontUrl, storage_path: `${userId}/${scanId}/front.jpg` }));
+      if (sideUrl) promises.push(supabase.from('measurement_images').insert({ measurement_id: scanId, view_type: 'side', public_url: sideUrl, storage_path: `${userId}/${scanId}/side.jpg` }));
+
+      // Table: measurement_calculations (Transparency Log)
+      if (results.technical_analysis) {
+        // Scaling
+        promises.push(supabase.from('measurement_calculations').insert({
+          measurement_id: scanId,
+          metric_name: 'global_scaling',
+          raw_pixels: results.technical_analysis.scaling.pixel_height.toString(),
+          scaling_factor: results.technical_analysis.scaling.cm_per_pixel,
+          formula: `height_cm / height_px (${stats.height} / ${results.technical_analysis.scaling.pixel_height})`
+        }));
+
+        // Key areas formulas
+        Object.entries(results.technical_analysis.formulas || {}).forEach(([part, formula]) => {
+          const raw = results.technical_analysis?.raw_measurements[part];
+          promises.push(supabase.from('measurement_calculations').insert({
+            measurement_id: scanId,
+            metric_name: part,
+            raw_pixels: raw ? JSON.stringify(raw) : null,
+            formula: formula,
+            scaling_factor: results.technical_analysis?.scaling.cm_per_pixel
+          }));
+        });
+      }
+
+      await Promise.allSettled(promises);
+    } catch (auxErr) {
+      console.warn("Failed to save auxiliary data (images/calculations), but main record was saved.", auxErr);
     }
-    if (sideUrl) {
-      promises.push(supabase.from('measurement_images').insert({ measurement_id: scanId, view_type: 'side', public_url: sideUrl, storage_path: `${userId}/${scanId}/side.jpg` }));
-    }
-
-    // Table: measurement_calculations (Transparency Log)
-    if (results.technical_analysis) {
-      // Scaling
-      promises.push(supabase.from('measurement_calculations').insert({
-        measurement_id: scanId,
-        metric_name: 'global_scaling',
-        raw_pixels: results.technical_analysis.scaling.pixel_height.toString(),
-        scaling_factor: results.technical_analysis.scaling.cm_per_pixel,
-        formula: `height_cm / height_px (${stats.height} / ${results.technical_analysis.scaling.pixel_height})`
-      }));
-
-      // Key areas formulas
-      Object.entries(results.technical_analysis.formulas || {}).forEach(([part, formula]) => {
-         const raw = results.technical_analysis?.raw_measurements[part];
-         promises.push(supabase.from('measurement_calculations').insert({
-           measurement_id: scanId,
-           metric_name: part,
-           raw_pixels: raw ? JSON.stringify(raw) : null,
-           formula: formula,
-           scaling_factor: results.technical_analysis?.scaling.cm_per_pixel
-         }));
-      });
-    }
-
-    await Promise.allSettled(promises);
 
     return measurementData;
   } catch (err) {
-    console.error('Supabase operation failed:', err);
+    console.error('Supabase operation failed completely:', err);
     return null;
   }
 };
