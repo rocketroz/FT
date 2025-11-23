@@ -7,6 +7,7 @@ import { ResultsView } from './components/ResultsView';
 import { SettingsModal } from './components/SettingsModal'; 
 import { AdminDashboard } from './components/AdminDashboard';
 import { analyzeBodyMeasurements } from './services/geminiService';
+import { saveScanResult, isSupabaseConnected } from './services/supabaseService';
 import { ScanLine, ArrowRight, Activity, Settings } from 'lucide-react';
 
 const App: React.FC = () => {
@@ -15,6 +16,7 @@ const App: React.FC = () => {
   
   // Model Config State
   const [activeModel, setActiveModel] = useState<string>('gemini-3-pro-preview');
+  const [dualRunMode, setDualRunMode] = useState<boolean>(false); // Developer flag
 
   // Capture State
   const [frontImage, setFrontImage] = useState<string | null>(null);
@@ -59,10 +61,56 @@ const App: React.FC = () => {
 
     try {
       if (stats && frontImage && frontMeta) {
-        // Analyze with Gemini (now including enhanced fields and active model)
-        console.log(`Analyzing with model: ${activeModel}`);
-        const analysis = await analyzeBodyMeasurements(frontImage, image, stats, activeModel);
-        setResults(analysis);
+        
+        console.log(`Starting Analysis. Dual Run Mode: ${dualRunMode}`);
+
+        if (dualRunMode) {
+          // --- DUAL RUN LOGIC ---
+          // Run both models in parallel
+          const modelA = "gemini-3-pro-preview";
+          const modelB = "gemini-2.5-flash";
+          
+          const promiseA = analyzeBodyMeasurements(frontImage, image, stats, modelA);
+          const promiseB = analyzeBodyMeasurements(frontImage, image, stats, modelB);
+
+          const [resultA, resultB] = await Promise.allSettled([promiseA, promiseB]);
+          
+          // Determine which result to show based on selection
+          let displayResult: MeasurementResult | null = null;
+          let shadowResult: MeasurementResult | null = null;
+
+          if (resultA.status === 'fulfilled') {
+             if (activeModel === modelA) displayResult = resultA.value;
+             else shadowResult = resultA.value;
+          }
+          if (resultB.status === 'fulfilled') {
+             if (activeModel === modelB) displayResult = resultB.value;
+             else shadowResult = resultB.value;
+          }
+
+          if (!displayResult) throw new Error("Selected model analysis failed");
+
+          setResults(displayResult);
+          
+          // Try to save shadow result immediately if authenticated, effectively logging the A/B test
+          // Note: Real saving happens in ResultsView usually, but for Dual Run logging we do it here if possible.
+          if (shadowResult && isSupabaseConnected()) {
+             // We attempt to save the background result silently
+             saveScanResult(
+               stats, 
+               shadowResult, 
+               { front: frontImage, side: image }, 
+               { front: frontMeta, side: meta }, 
+               { objBlob: null, usdzBlob: null }
+             ).then(() => console.log("Shadow run saved to DB")).catch(e => console.warn("Shadow run save failed", e));
+          }
+
+        } else {
+          // --- STANDARD LOGIC ---
+          const analysis = await analyzeBodyMeasurements(frontImage, image, stats, activeModel);
+          setResults(analysis);
+        }
+
         setStep(AppStep.Results);
       } else {
         throw new Error("Missing front image or stats");
@@ -175,8 +223,12 @@ const App: React.FC = () => {
                 Start Measurement <ArrowRight />
               </button>
               
-              <div className="text-xs text-slate-400 font-medium">
+              <div className="text-xs text-slate-400 font-medium flex items-center gap-2">
                 Active Strategy: <span className="text-slate-600 font-bold uppercase">{activeModel}</span>
+                {/* Developer Toggle for Dual Mode (Hidden or discreet) */}
+                <button onClick={() => setDualRunMode(!dualRunMode)} className={`px-1.5 py-0.5 rounded text-[9px] font-bold ${dualRunMode ? 'bg-purple-100 text-purple-700' : 'text-slate-300'}`}>
+                  {dualRunMode ? 'A/B ON' : 'A/B'}
+                </button>
               </div>
             </div>
           </div>

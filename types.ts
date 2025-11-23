@@ -17,6 +17,7 @@ export interface UsageMetadata {
   promptTokenCount: number;
   candidatesTokenCount: number;
   totalTokenCount: number;
+  thinkingTokenCount?: number;
 }
 
 export interface LandmarkPoint {
@@ -50,6 +51,9 @@ export interface LandmarkSet {
   hip_back?: LandmarkPoint;
   knee?: LandmarkPoint;
   ankle?: LandmarkPoint;
+  
+  // Back Specific (if needed, mostly side spine)
+  back_spine?: LandmarkPoint;
 }
 
 export interface MeasurementResult {
@@ -86,6 +90,11 @@ export interface MeasurementResult {
   thought_summary?: string; // Natural language reasoning
   token_count?: number; 
   
+  // Explicit Landmark Sets
+  landmarks_front?: LandmarkSet;
+  landmarks_side?: LandmarkSet;
+
+  // Legacy structure for backward compatibility (optional)
   landmarks?: {
     front: LandmarkSet;
     side: LandmarkSet;

@@ -1,7 +1,7 @@
 
 import React, { useRef, useEffect, useState } from 'react';
 import { MeasurementResult, UserStats } from '../types';
-import { Share2, RefreshCcw, AlertCircle, CheckCircle2, Download, FileDown, Box, CloudUpload, Printer, Globe, Brain, Terminal, ChevronDown, ChevronUp, Ruler, Gauge, AlertTriangle, Cpu, Zap, Scan } from 'lucide-react';
+import { Share2, RefreshCcw, AlertCircle, CheckCircle2, Download, FileDown, Box, CloudUpload, Printer, Globe, Brain, Terminal, ChevronDown, ChevronUp, Ruler, Gauge, AlertTriangle, Cpu, Zap, Scan, Layers } from 'lucide-react';
 import { BodyVisualizer, BodyVisualizerHandle } from './BodyVisualizer';
 import { AuthForm } from './AuthForm';
 import { getUser, saveScanResult } from '../services/supabaseService';
@@ -304,8 +304,9 @@ export const ResultsView: React.FC<Props> = ({ results, stats, onReset, image, s
                    <div className="mb-6">
                       <h5 className="text-green-400 font-bold mb-1">// LANDMARKS DETECTED</h5>
                       <div className="flex gap-4 text-slate-400">
-                         <span>Front: {results.landmarks?.front ? Object.keys(results.landmarks.front).length : 0} pts</span>
-                         <span>Side: {results.landmarks?.side ? Object.keys(results.landmarks.side).length : 0} pts</span>
+                         {/* Fallback to legacy check or new fields */}
+                         <span>Front: {results.landmarks_front ? Object.keys(results.landmarks_front).length : (results.landmarks?.front ? Object.keys(results.landmarks.front).length : 0)} pts</span>
+                         <span>Side: {results.landmarks_side ? Object.keys(results.landmarks_side).length : (results.landmarks?.side ? Object.keys(results.landmarks.side).length : 0)} pts</span>
                       </div>
                    </div>
 
@@ -314,15 +315,22 @@ export const ResultsView: React.FC<Props> = ({ results, stats, onReset, image, s
                      <div className="mb-6 p-2 bg-slate-800 rounded border border-slate-700 flex justify-between">
                         <div className="text-center">
                           <span className="block font-bold text-white">{results.usage_metadata.promptTokenCount}</span>
-                          <span className="block text-[9px] text-slate-500 uppercase">Input Tokens</span>
+                          <span className="block text-[9px] text-slate-500 uppercase">Input</span>
                         </div>
                         <div className="text-center">
                           <span className="block font-bold text-white">{results.usage_metadata.candidatesTokenCount}</span>
-                          <span className="block text-[9px] text-slate-500 uppercase">Output Tokens</span>
+                          <span className="block text-[9px] text-slate-500 uppercase">Output</span>
                         </div>
+                        {/* Thinking tokens if available */}
+                        {results.usage_metadata.thinkingTokenCount ? (
+                          <div className="text-center">
+                             <span className="block font-bold text-amber-400">{results.usage_metadata.thinkingTokenCount}</span>
+                             <span className="block text-[9px] text-slate-500 uppercase">Thought</span>
+                          </div>
+                        ) : null}
                         <div className="text-center">
                           <span className="block font-bold text-green-400">{results.usage_metadata.totalTokenCount}</span>
-                          <span className="block text-[9px] text-slate-500 uppercase">Total Cost</span>
+                          <span className="block text-[9px] text-slate-500 uppercase">Total</span>
                         </div>
                      </div>
                    )}

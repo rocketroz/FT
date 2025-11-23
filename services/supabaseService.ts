@@ -124,8 +124,14 @@ export const saveScanResult = async (
     if (models.objBlob) objUrl = await uploadFile('scans', `${userId}/${scanId}/model_${timestamp}.obj`, models.objBlob);
     if (models.usdzBlob) usdzUrl = await uploadFile('scans', `${userId}/${scanId}/model_${timestamp}.usdz`, models.usdzBlob);
 
-    // Calculate approximate cost (Simulated based on typical token pricing)
-    const cost = (results.usage_metadata?.totalTokenCount || 0) * 0.000005; // Dummy multiplier
+    // Calculate approximate cost (Simulated)
+    const cost = (results.usage_metadata?.totalTokenCount || 0) * 0.000004; // $4 per 1M tokens approx for generic 2.5 input
+
+    // Prepare JSON for landmarks (combining front and side)
+    const landmarksJson = {
+      front: results.landmarks_front || results.landmarks?.front,
+      side: results.landmarks_side || results.landmarks?.side
+    };
 
     // 2. Insert Main Measurement Record
     const { data: measurementData, error: measurementError } = await supabase
@@ -157,9 +163,9 @@ export const saveScanResult = async (
         scaling_factor: results.scaling_factor || results.technical_analysis?.scaling.cm_per_pixel,
         estimated_height_cm: results.estimated_height_cm,
         thought_summary: results.thought_summary,
-        landmarks_json: results.landmarks || null,
+        landmarks_json: landmarksJson,
         token_count: results.usage_metadata?.totalTokenCount,
-        thinking_tokens: null, // Logic could be added here if usageMetadata split this out explicitly
+        thinking_tokens: results.usage_metadata?.thinkingTokenCount || null,
         api_cost_usd: cost
       }])
       .select()
@@ -184,7 +190,7 @@ export const saveScanResult = async (
       promises.push(supabase.from('measurement_calculations').insert({
         measurement_id: scanId,
         metric_name: 'global_scaling',
-        raw_pixels: results.technical_analysis.scaling.pixel_height,
+        raw_pixels: results.technical_analysis.scaling.pixel_height.toString(),
         scaling_factor: results.technical_analysis.scaling.cm_per_pixel,
         formula: `height_cm / height_px (${stats.height} / ${results.technical_analysis.scaling.pixel_height})`
       }));

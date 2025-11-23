@@ -29,7 +29,7 @@ export const analyzeBodyMeasurements = async (
 
     2. LANDMARKS:
        - Identify specific anatomical landmarks (x,y coordinates normalized 0-1) for both Front and Side views.
-       - You MUST return the full set of landmarks defined in the schema (shoulders, waist, hips, knees, ankles, etc.).
+       - You MUST return "landmarks_front" and "landmarks_side" with the specific points defined in the schema.
 
     3. MEASUREMENT:
        - Measure raw pixel widths (Front) and depths (Side) for key areas (Chest, Waist, Hips, Thigh, etc.).
@@ -69,43 +69,39 @@ export const analyzeBodyMeasurements = async (
       estimated_height_cm: { type: Type.NUMBER, description: "AI estimated height based on proportions" },
       thought_summary: { type: Type.STRING, description: "Natural language summary of reasoning" },
       
-      // Landmarks
-      landmarks: {
-        type: Type.OBJECT,
-        properties: {
-          front: {
-             type: Type.OBJECT,
-             properties: {
-               head_top: { type: Type.OBJECT, properties: {x: {type: Type.NUMBER}, y: {type: Type.NUMBER}} },
-               neck_base: { type: Type.OBJECT, properties: {x: {type: Type.NUMBER}, y: {type: Type.NUMBER}} },
-               shoulder_left: { type: Type.OBJECT, properties: {x: {type: Type.NUMBER}, y: {type: Type.NUMBER}} },
-               shoulder_right: { type: Type.OBJECT, properties: {x: {type: Type.NUMBER}, y: {type: Type.NUMBER}} },
-               waist_left: { type: Type.OBJECT, properties: {x: {type: Type.NUMBER}, y: {type: Type.NUMBER}} },
-               waist_right: { type: Type.OBJECT, properties: {x: {type: Type.NUMBER}, y: {type: Type.NUMBER}} },
-               hip_left: { type: Type.OBJECT, properties: {x: {type: Type.NUMBER}, y: {type: Type.NUMBER}} },
-               hip_right: { type: Type.OBJECT, properties: {x: {type: Type.NUMBER}, y: {type: Type.NUMBER}} },
-               knee_left: { type: Type.OBJECT, properties: {x: {type: Type.NUMBER}, y: {type: Type.NUMBER}} },
-               knee_right: { type: Type.OBJECT, properties: {x: {type: Type.NUMBER}, y: {type: Type.NUMBER}} },
-               ankle_left: { type: Type.OBJECT, properties: {x: {type: Type.NUMBER}, y: {type: Type.NUMBER}} },
-               ankle_right: { type: Type.OBJECT, properties: {x: {type: Type.NUMBER}, y: {type: Type.NUMBER}} },
-               feet_center: { type: Type.OBJECT, properties: {x: {type: Type.NUMBER}, y: {type: Type.NUMBER}} }
-             }
-          },
-          side: {
-             type: Type.OBJECT,
-             properties: {
-                neck_point: { type: Type.OBJECT, properties: {x: {type: Type.NUMBER}, y: {type: Type.NUMBER}} },
-                chest_front: { type: Type.OBJECT, properties: {x: {type: Type.NUMBER}, y: {type: Type.NUMBER}} },
-                chest_back: { type: Type.OBJECT, properties: {x: {type: Type.NUMBER}, y: {type: Type.NUMBER}} },
-                waist_front: { type: Type.OBJECT, properties: {x: {type: Type.NUMBER}, y: {type: Type.NUMBER}} },
-                waist_back: { type: Type.OBJECT, properties: {x: {type: Type.NUMBER}, y: {type: Type.NUMBER}} },
-                hip_front: { type: Type.OBJECT, properties: {x: {type: Type.NUMBER}, y: {type: Type.NUMBER}} },
-                hip_back: { type: Type.OBJECT, properties: {x: {type: Type.NUMBER}, y: {type: Type.NUMBER}} },
-                knee: { type: Type.OBJECT, properties: {x: {type: Type.NUMBER}, y: {type: Type.NUMBER}} },
-                ankle: { type: Type.OBJECT, properties: {x: {type: Type.NUMBER}, y: {type: Type.NUMBER}} }
-             }
-          }
-        }
+      // Landmarks - Flattened Top Level as requested
+      landmarks_front: {
+         type: Type.OBJECT,
+         properties: {
+           head_top: { type: Type.OBJECT, properties: {x: {type: Type.NUMBER}, y: {type: Type.NUMBER}} },
+           neck_base: { type: Type.OBJECT, properties: {x: {type: Type.NUMBER}, y: {type: Type.NUMBER}} },
+           shoulder_left: { type: Type.OBJECT, properties: {x: {type: Type.NUMBER}, y: {type: Type.NUMBER}} },
+           shoulder_right: { type: Type.OBJECT, properties: {x: {type: Type.NUMBER}, y: {type: Type.NUMBER}} },
+           waist_left: { type: Type.OBJECT, properties: {x: {type: Type.NUMBER}, y: {type: Type.NUMBER}} },
+           waist_right: { type: Type.OBJECT, properties: {x: {type: Type.NUMBER}, y: {type: Type.NUMBER}} },
+           hip_left: { type: Type.OBJECT, properties: {x: {type: Type.NUMBER}, y: {type: Type.NUMBER}} },
+           hip_right: { type: Type.OBJECT, properties: {x: {type: Type.NUMBER}, y: {type: Type.NUMBER}} },
+           knee_left: { type: Type.OBJECT, properties: {x: {type: Type.NUMBER}, y: {type: Type.NUMBER}} },
+           knee_right: { type: Type.OBJECT, properties: {x: {type: Type.NUMBER}, y: {type: Type.NUMBER}} },
+           ankle_left: { type: Type.OBJECT, properties: {x: {type: Type.NUMBER}, y: {type: Type.NUMBER}} },
+           ankle_right: { type: Type.OBJECT, properties: {x: {type: Type.NUMBER}, y: {type: Type.NUMBER}} },
+           feet_center: { type: Type.OBJECT, properties: {x: {type: Type.NUMBER}, y: {type: Type.NUMBER}} }
+         }
+      },
+      landmarks_side: {
+         type: Type.OBJECT,
+         properties: {
+            neck_point: { type: Type.OBJECT, properties: {x: {type: Type.NUMBER}, y: {type: Type.NUMBER}} },
+            chest_front: { type: Type.OBJECT, properties: {x: {type: Type.NUMBER}, y: {type: Type.NUMBER}} },
+            chest_back: { type: Type.OBJECT, properties: {x: {type: Type.NUMBER}, y: {type: Type.NUMBER}} },
+            waist_front: { type: Type.OBJECT, properties: {x: {type: Type.NUMBER}, y: {type: Type.NUMBER}} },
+            waist_back: { type: Type.OBJECT, properties: {x: {type: Type.NUMBER}, y: {type: Type.NUMBER}} },
+            hip_front: { type: Type.OBJECT, properties: {x: {type: Type.NUMBER}, y: {type: Type.NUMBER}} },
+            hip_back: { type: Type.OBJECT, properties: {x: {type: Type.NUMBER}, y: {type: Type.NUMBER}} },
+            knee: { type: Type.OBJECT, properties: {x: {type: Type.NUMBER}, y: {type: Type.NUMBER}} },
+            ankle: { type: Type.OBJECT, properties: {x: {type: Type.NUMBER}, y: {type: Type.NUMBER}} },
+            back_spine: { type: Type.OBJECT, properties: {x: {type: Type.NUMBER}, y: {type: Type.NUMBER}} }
+         }
       },
 
       // Meta
@@ -189,7 +185,7 @@ export const analyzeBodyMeasurements = async (
       "waist", "hips", 
       "inseam", "outseam", "thigh", "calf", "ankle", 
       "confidence", "technical_analysis", "quality_assessment",
-      "scaling_factor", "thought_summary"
+      "scaling_factor", "thought_summary", "landmarks_front", "landmarks_side"
     ],
   };
 
@@ -234,13 +230,23 @@ export const analyzeBodyMeasurements = async (
           result.usage_metadata = {
             promptTokenCount: response.usageMetadata.promptTokenCount,
             candidatesTokenCount: response.usageMetadata.candidatesTokenCount,
-            totalTokenCount: response.usageMetadata.totalTokenCount
+            totalTokenCount: response.usageMetadata.totalTokenCount,
+            // @ts-ignore - thinkingTokenCount might not be in the default type definition yet
+            thinkingTokenCount: response.usageMetadata.thinkingTokenCount
           };
           result.token_count = response.usageMetadata.totalTokenCount;
         }
 
         // --- Persist model ID in the result object ---
         result.model_name = modelId;
+        
+        // Backfill legacy landmarks structure if visualizer relies on it
+        if (!result.landmarks && result.landmarks_front && result.landmarks_side) {
+          result.landmarks = {
+            front: result.landmarks_front,
+            side: result.landmarks_side
+          };
+        }
 
         return result;
       } catch (e) {

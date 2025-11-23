@@ -64,7 +64,7 @@ export const AdminDashboard: React.FC<Props> = ({ onBack }) => {
                 )}
                 {scans.map((scan) => {
                   const m = getMeasurementJson(scan);
-                  const modelName = m.model_name || 'unknown';
+                  const modelName = scan.model_name || m.model_name || 'unknown';
                   return (
                     <div 
                       key={scan.id} 
@@ -107,9 +107,12 @@ export const AdminDashboard: React.FC<Props> = ({ onBack }) => {
                       <p className="text-xs text-slate-500 font-mono">{selectedScan.id}</p>
                     </div>
                     <div className="flex gap-2 text-sm">
-                       <a href={selectedScan.front_image_url} target="_blank" rel="noreferrer" className="text-blue-600 hover:underline">Front Img</a>
-                       <span className="text-slate-300">|</span>
-                       <a href={selectedScan.side_image_url} target="_blank" rel="noreferrer" className="text-blue-600 hover:underline">Side Img</a>
+                       {selectedScan.public_url ? (
+                         // If images are stored with URL directly on measurement object (legacy)
+                         <a href={selectedScan.public_url} target="_blank" rel="noreferrer" className="text-blue-600 hover:underline">Front Img</a>
+                       ) : (
+                         <span className="text-slate-400 italic">Images linked in sub-table</span>
+                       )}
                     </div>
                  </div>
                  
@@ -118,69 +121,69 @@ export const AdminDashboard: React.FC<Props> = ({ onBack }) => {
                        <div className="p-4 bg-slate-50 rounded-lg">
                           <h4 className="text-xs font-bold text-slate-400 uppercase mb-2">Metrics</h4>
                           <div className="space-y-1 text-sm">
-                             <div className="flex justify-between"><span>Chest:</span> <b>{selectedScan.parsed.chest?.toFixed(1)}</b></div>
-                             <div className="flex justify-between"><span>Waist:</span> <b>{selectedScan.parsed.waist?.toFixed(1)}</b></div>
-                             <div className="flex justify-between"><span>Hips:</span> <b>{selectedScan.parsed.hips?.toFixed(1)}</b></div>
+                             <div className="flex justify-between"><span>Chest:</span> <b>{selectedScan.chest?.toFixed(1) || selectedScan.parsed.chest?.toFixed(1)}</b></div>
+                             <div className="flex justify-between"><span>Waist:</span> <b>{selectedScan.waist?.toFixed(1) || selectedScan.parsed.waist?.toFixed(1)}</b></div>
+                             <div className="flex justify-between"><span>Hips:</span> <b>{selectedScan.hips?.toFixed(1) || selectedScan.parsed.hips?.toFixed(1)}</b></div>
                           </div>
                        </div>
                        <div className="p-4 bg-slate-50 rounded-lg">
                           <h4 className="text-xs font-bold text-slate-400 uppercase mb-2">Metadata</h4>
                           <div className="space-y-1 text-sm">
                              <div className="flex justify-between"><span>Method:</span> <span className="text-slate-600">{selectedScan.capture_method}</span></div>
-                             <div className="flex justify-between"><span>Confidence:</span> <span className="text-slate-600">{selectedScan.parsed.confidence}%</span></div>
+                             <div className="flex justify-between"><span>Confidence:</span> <span className="text-slate-600">{selectedScan.confidence_score}%</span></div>
                              
                              <div className="flex justify-between pt-2 mt-2 border-t border-slate-200">
                                <span>Model:</span> 
-                               <span className={`font-bold text-xs ${selectedScan.parsed.model_name?.includes('2.5') ? 'text-amber-600' : 'text-blue-600'}`}>
-                                 {selectedScan.parsed.model_name}
+                               <span className={`font-bold text-xs ${selectedScan.model_name?.includes('2.5') ? 'text-amber-600' : 'text-blue-600'}`}>
+                                 {selectedScan.model_name || selectedScan.parsed.model_name}
                                </span>
                              </div>
 
-                             {selectedScan.parsed.usage_metadata && (
+                             {(selectedScan.token_count || selectedScan.parsed.usage_metadata) && (
                                <div className="flex justify-between">
                                  <span>Tokens:</span> 
-                                 <span className="text-green-600 font-mono text-xs">{selectedScan.parsed.usage_metadata.totalTokenCount}</span>
+                                 <span className="text-green-600 font-mono text-xs">{selectedScan.token_count || selectedScan.parsed.usage_metadata?.totalTokenCount}</span>
+                               </div>
+                             )}
+                             
+                             {selectedScan.api_cost_usd && (
+                               <div className="flex justify-between">
+                                 <span>Est Cost:</span> 
+                                 <span className="text-slate-500 text-xs">${Number(selectedScan.api_cost_usd).toFixed(6)}</span>
                                </div>
                              )}
                           </div>
                        </div>
                     </div>
-
-                    {selectedScan.parsed.technical_analysis && (
-                      <div className="mb-6 bg-slate-50 p-4 rounded-lg border border-slate-200">
-                        <h4 className="text-xs font-bold text-blue-600 uppercase mb-3 flex items-center gap-2">
+                    
+                    {/* Transparency Fields from DB columns */}
+                    <div className="mb-6 bg-slate-50 p-4 rounded-lg border border-slate-200">
+                         <h4 className="text-xs font-bold text-blue-600 uppercase mb-3 flex items-center gap-2">
                            <FileText size={14}/> Technical Transparency
                         </h4>
                         
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                           <div>
-                              <span className="block text-xs font-bold text-slate-500 mb-1">Formulas Used</span>
-                              <div className="space-y-2">
-                                {Object.entries(selectedScan.parsed.technical_analysis.formulas || {}).map(([k, v]) => (
-                                  <div key={k} className="text-xs">
-                                     <span className="font-bold capitalize">{k}:</span> <span className="font-mono text-slate-600">{v as string}</span>
-                                  </div>
-                                ))}
-                              </div>
+                        <div className="grid grid-cols-1 gap-2 text-sm">
+                           <div className="flex justify-between border-b border-slate-200 pb-1">
+                              <span className="text-slate-500">Scaling Factor:</span>
+                              <span className="font-mono">{selectedScan.scaling_factor}</span>
                            </div>
-                           <div>
-                              <span className="block text-xs font-bold text-slate-500 mb-1">Quality Breakdown</span>
-                              {selectedScan.parsed.quality_assessment && (
-                                <ul className="text-xs space-y-1">
-                                  <li>Front Img: <b>{selectedScan.parsed.quality_assessment.front_image_quality}/10</b></li>
-                                  <li>Side Img: <b>{selectedScan.parsed.quality_assessment.side_image_quality}/10</b></li>
-                                  <li>Pose: <b>{selectedScan.parsed.quality_assessment.pose_consistency}/10</b></li>
-                                </ul>
-                              )}
+                           <div className="flex justify-between border-b border-slate-200 pb-1">
+                              <span className="text-slate-500">AI Est. Height:</span>
+                              <span className="font-mono">{selectedScan.estimated_height_cm} cm</span>
                            </div>
+                           {selectedScan.thinking_tokens && (
+                             <div className="flex justify-between border-b border-slate-200 pb-1">
+                                <span className="text-slate-500">Thinking Tokens:</span>
+                                <span className="font-mono text-amber-600">{selectedScan.thinking_tokens}</span>
+                             </div>
+                           )}
                         </div>
-                      </div>
-                    )}
+                    </div>
 
                     <div className="mb-6">
                       <h4 className="text-xs font-bold text-slate-400 uppercase mb-2">Thoughts & Reasoning</h4>
                       <div className="p-4 bg-slate-900 text-slate-300 rounded-lg text-xs font-mono whitespace-pre-wrap leading-relaxed max-h-60 overflow-y-auto">
-                        {selectedScan.parsed.thought_summary || "No thinking data available."}
+                        {selectedScan.thought_summary || selectedScan.parsed.thought_summary || "No thinking data available."}
                       </div>
                     </div>
 
