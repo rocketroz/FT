@@ -130,7 +130,7 @@ export const AdminDashboard: React.FC<Props> = ({ onBack }) => {
                           <h4 className="text-xs font-bold text-slate-400 uppercase mb-2">Metadata</h4>
                           <div className="space-y-1 text-sm">
                              <div className="flex justify-between"><span>Method:</span> <span className="text-slate-600">{selectedScan.capture_method}</span></div>
-                             <div className="flex justify-between"><span>Confidence:</span> <span className="text-slate-600">{selectedScan.confidence_score}%</span></div>
+                             <div className="flex justify-between"><span>Confidence:</span> <span className="text-slate-600">{selectedScan.confidence}%</span></div>
                              
                              <div className="flex justify-between pt-2 mt-2 border-t border-slate-200">
                                <span>Model:</span> 
