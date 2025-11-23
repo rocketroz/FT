@@ -154,7 +154,7 @@ export const saveScanResult = async (
         sleeve: results.sleeve,
         
         // Meta
-        confidence_score: results.confidence,
+        confidence: results.confidence,
         capture_method: metadata.front.method,
         full_json: results, // Full Backup
         
