@@ -1,3 +1,4 @@
+
 export enum Gender {
   Male = 'Male',
   Female = 'Female',
@@ -16,6 +17,39 @@ export interface UsageMetadata {
   promptTokenCount: number;
   candidatesTokenCount: number;
   totalTokenCount: number;
+}
+
+export interface LandmarkPoint {
+  x: number;
+  y: number;
+}
+
+export interface LandmarkSet {
+  // Common / Front
+  head_top?: LandmarkPoint;
+  neck_base?: LandmarkPoint;
+  shoulder_left?: LandmarkPoint;
+  shoulder_right?: LandmarkPoint;
+  waist_left?: LandmarkPoint;
+  waist_right?: LandmarkPoint;
+  hip_left?: LandmarkPoint;
+  hip_right?: LandmarkPoint;
+  knee_left?: LandmarkPoint;
+  knee_right?: LandmarkPoint;
+  ankle_left?: LandmarkPoint;
+  ankle_right?: LandmarkPoint;
+  feet_center?: LandmarkPoint;
+
+  // Side Specific
+  neck_point?: LandmarkPoint;
+  chest_front?: LandmarkPoint;
+  chest_back?: LandmarkPoint; // inferred
+  waist_front?: LandmarkPoint;
+  waist_back?: LandmarkPoint;
+  hip_front?: LandmarkPoint;
+  hip_back?: LandmarkPoint;
+  knee?: LandmarkPoint;
+  ankle?: LandmarkPoint;
 }
 
 export interface MeasurementResult {
@@ -42,12 +76,22 @@ export interface MeasurementResult {
   // Meta
   confidence: number; // 0-100
   notes: string;
-  thought_summary?: string;
   body_shape?: string;
   percentiles?: Record<string, number>;
-  model_name?: string; // New field for A/B testing
   
-  // Detailed Technical Analysis
+  // --- Transparency & Tracking Fields ---
+  model_name?: string; // e.g. "gemini-3-pro-preview"
+  scaling_factor?: number; // pixels per cm
+  estimated_height_cm?: number; // AI's independent estimate
+  thought_summary?: string; // Natural language reasoning
+  token_count?: number; 
+  
+  landmarks?: {
+    front: LandmarkSet;
+    side: LandmarkSet;
+  };
+
+  // Detailed Technical Analysis (Legacy support & specific formula logging)
   technical_analysis?: {
     scaling: {
       pixel_height: number;
@@ -74,12 +118,6 @@ export interface MeasurementResult {
     severity: 'low' | 'medium' | 'high';
     advice: string;
   }>;
-
-  // Landmarks (Normalized 0-1)
-  landmarks?: {
-    front: Record<string, {x: number, y: number}>;
-    side: Record<string, {x: number, y: number}>;
-  };
 
   // API Metadata
   usage_metadata?: UsageMetadata;

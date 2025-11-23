@@ -26,9 +26,20 @@ export const AuthForm: React.FC<Props> = ({ onAuthSuccess }) => {
         if (error) throw error;
         if (user) onAuthSuccess();
       } else {
-        const { user, error } = await signUp(email, password);
+        const { user, error, session } = await signUp(email, password) as any; // Cast for session property access if type def varies
         if (error) throw error;
-        if (user) setMessage("Check your email for the confirmation link!");
+        
+        if (user) {
+           if (!session) {
+             // Email confirmation is required by Supabase default settings
+             setMessage(`Account created! Please check your email (${email}) to confirm your account before signing in.`);
+             setIsLogin(true); // Switch back to login mode so they are ready
+           } else {
+             // If auto-confirm is on (rare for prod), we log them in
+             setMessage("Account created successfully!");
+             onAuthSuccess();
+           }
+        }
       }
     } catch (err: any) {
       setError(err.message || "Authentication failed");
@@ -38,7 +49,7 @@ export const AuthForm: React.FC<Props> = ({ onAuthSuccess }) => {
   };
 
   return (
-    <div className="bg-white p-6 rounded-xl shadow-lg border border-slate-200 max-w-sm w-full">
+    <div className="bg-white p-6 rounded-xl shadow-lg border border-slate-200 w-full">
       <h3 className="text-xl font-bold text-slate-900 mb-2">
         {isLogin ? 'Sign In to Save' : 'Create Account'}
       </h3>
@@ -46,8 +57,8 @@ export const AuthForm: React.FC<Props> = ({ onAuthSuccess }) => {
         {isLogin ? 'Access your past measurements.' : 'Save your results and 3D models forever.'}
       </p>
 
-      {error && <div className="bg-red-50 text-red-600 p-3 rounded-lg text-sm mb-4">{error}</div>}
-      {message && <div className="bg-green-50 text-green-600 p-3 rounded-lg text-sm mb-4">{message}</div>}
+      {error && <div className="bg-red-50 text-red-600 p-3 rounded-lg text-sm mb-4 font-medium flex items-center gap-2"><div className="w-1.5 h-1.5 rounded-full bg-red-600"></div>{error}</div>}
+      {message && <div className="bg-green-50 text-green-700 p-3 rounded-lg text-sm mb-4 font-medium border border-green-200">{message}</div>}
 
       <form onSubmit={handleSubmit} className="space-y-4">
         <div>
@@ -91,7 +102,7 @@ export const AuthForm: React.FC<Props> = ({ onAuthSuccess }) => {
       
       <div className="mt-4 pt-4 border-t border-slate-100 text-center">
         <button 
-          onClick={() => setIsLogin(!isLogin)}
+          onClick={() => { setIsLogin(!isLogin); setError(null); setMessage(null); }}
           className="text-sm text-blue-600 hover:underline font-medium"
         >
           {isLogin ? "Don't have an account? Sign Up" : "Already have an account? Sign In"}

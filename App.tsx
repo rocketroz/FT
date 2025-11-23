@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { AppStep, UserStats, MeasurementResult, CaptureMetadata } from './types';
 import { StatsForm } from './components/StatsForm';
@@ -175,7 +176,7 @@ const App: React.FC = () => {
               </button>
               
               <div className="text-xs text-slate-400 font-medium">
-                Using Model: <span className="text-slate-600 font-bold">{activeModel}</span>
+                Active Strategy: <span className="text-slate-600 font-bold uppercase">{activeModel}</span>
               </div>
             </div>
           </div>

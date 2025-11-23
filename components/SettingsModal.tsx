@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { X, Save, Database, CheckCircle, AlertCircle, Shield, Cpu, Activity } from 'lucide-react';
 import { configureSupabase, isSupabaseConnected } from '../services/supabaseService';

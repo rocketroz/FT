@@ -1,6 +1,7 @@
+
 import React, { useEffect, useState } from 'react';
 import { getScans } from '../services/supabaseService';
-import { ArrowLeft, RefreshCw, Calendar, User, Ruler, FileText, CheckCircle, AlertTriangle } from 'lucide-react';
+import { ArrowLeft, RefreshCw, Calendar, User, Ruler, FileText, CheckCircle, AlertTriangle, Cpu } from 'lucide-react';
 
 interface Props {
   onBack: () => void;
@@ -63,6 +64,7 @@ export const AdminDashboard: React.FC<Props> = ({ onBack }) => {
                 )}
                 {scans.map((scan) => {
                   const m = getMeasurementJson(scan);
+                  const modelName = m.model_name || 'unknown';
                   return (
                     <div 
                       key={scan.id} 
@@ -80,9 +82,14 @@ export const AdminDashboard: React.FC<Props> = ({ onBack }) => {
                         </span>
                         <span className="text-[10px] text-slate-400">{new Date(scan.created_at).toLocaleDateString()}</span>
                       </div>
-                      <div className="flex items-center gap-2 text-xs text-slate-500">
-                         <User size={12} /> {scan.user_id === 'anon' ? 'Anonymous' : scan.user_id?.substring(0,8)}
-                         {m.confidence < 70 && <AlertTriangle size={12} className="text-amber-500 ml-auto"/>}
+                      <div className="flex justify-between items-center mt-2">
+                         <div className="flex items-center gap-2 text-xs text-slate-500">
+                            <User size={12} /> {scan.user_id === 'anon' ? 'Anonymous' : scan.user_id?.substring(0,8)}
+                         </div>
+                         {/* Model Badge in List */}
+                         <div className={`text-[9px] px-1.5 py-0.5 rounded font-bold uppercase ${modelName.includes('2.5') ? 'bg-amber-100 text-amber-700' : 'bg-blue-100 text-blue-700'}`}>
+                           {modelName.replace('gemini-', '').replace('-preview', '')}
+                         </div>
                       </div>
                     </div>
                   );
@@ -117,12 +124,20 @@ export const AdminDashboard: React.FC<Props> = ({ onBack }) => {
                           </div>
                        </div>
                        <div className="p-4 bg-slate-50 rounded-lg">
-                          <h4 className="text-xs font-bold text-slate-400 uppercase mb-2">Quality & Method</h4>
+                          <h4 className="text-xs font-bold text-slate-400 uppercase mb-2">Metadata</h4>
                           <div className="space-y-1 text-sm">
                              <div className="flex justify-between"><span>Method:</span> <span className="text-slate-600">{selectedScan.capture_method}</span></div>
                              <div className="flex justify-between"><span>Confidence:</span> <span className="text-slate-600">{selectedScan.parsed.confidence}%</span></div>
+                             
+                             <div className="flex justify-between pt-2 mt-2 border-t border-slate-200">
+                               <span>Model:</span> 
+                               <span className={`font-bold text-xs ${selectedScan.parsed.model_name?.includes('2.5') ? 'text-amber-600' : 'text-blue-600'}`}>
+                                 {selectedScan.parsed.model_name}
+                               </span>
+                             </div>
+
                              {selectedScan.parsed.usage_metadata && (
-                               <div className="flex justify-between pt-2 mt-2 border-t border-slate-200">
+                               <div className="flex justify-between">
                                  <span>Tokens:</span> 
                                  <span className="text-green-600 font-mono text-xs">{selectedScan.parsed.usage_metadata.totalTokenCount}</span>
                                </div>

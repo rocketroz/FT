@@ -1,10 +1,9 @@
+
 import { GoogleGenAI, Type, Schema } from "@google/genai";
 import { UserStats, MeasurementResult } from "../types";
-import { googleAIConfig } from "../config/env";
 
 // Initialize Gemini Client
-// Note: In a real production app, API calls should go through a backend proxy to hide the key.
-const ai = new GoogleGenAI({ apiKey: googleAIConfig.apiKey });
+const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
 export const analyzeBodyMeasurements = async (
   frontImageBase64: string,
@@ -18,22 +17,29 @@ export const analyzeBodyMeasurements = async (
     Analyze the attached TWO images (Front & Side) to calculate precise body measurements.
     
     GROUND TRUTH:
-    - Height: ${stats.height} cm
+    - User Provided Height: ${stats.height} cm
     ${stats.weight ? `- Weight: ${stats.weight} kg` : ''}
     ${stats.gender ? `- Gender: ${stats.gender}` : ''}
     
     TASK:
-    1. Identify anatomical landmarks in pixel coordinates for both views.
-    2. Calculate "pixels_per_cm" scaling factor using the subject's full height in the image vs real height.
-    3. Measure raw pixel widths (Front) and depths (Side) for key areas (Chest, Waist, Hips, Thigh, etc.).
-    4. Apply geometric formulas (e.g., Ramanujan approximation for ellipse circumference) to convert pixel dimensions to cm circumferences.
-    5. Assess image quality, pose, and lighting.
+    1. TRANSPARENCY & SCALING: 
+       - Identify the top of the head and bottom of the feet in the Front image.
+       - Calculate "scaling_factor" (pixels_per_cm) based on the User Provided Height vs the subject's pixel height.
+       - Independently estimate the subject's height ("estimated_height_cm") based on head-to-body proportions to cross-check the user provided value.
+
+    2. LANDMARKS:
+       - Identify specific anatomical landmarks (x,y coordinates normalized 0-1) for both Front and Side views.
+       - You MUST return the full set of landmarks defined in the schema (shoulders, waist, hips, knees, ankles, etc.).
+
+    3. MEASUREMENT:
+       - Measure raw pixel widths (Front) and depths (Side) for key areas (Chest, Waist, Hips, Thigh, etc.).
+       - Apply geometric formulas (e.g., Ramanujan approximation for ellipse circumference) to convert pixel dimensions to cm circumferences using the scaling_factor.
     
-    REQUIREMENTS:
-    - Return specific mathematical formulas used for each major circumference.
-    - Return raw pixel values before conversion.
-    - List any detected issues (blur, baggy clothes, bad pose).
-    - Provide coordinates for key landmarks for visual validation.
+    4. REASONING:
+       - Provide a "thought_summary" (2-3 sentences) explaining how you determined the fit and any adjustments made for posture or clothing.
+
+    5. QUALITY:
+       - Assess image quality, pose, and lighting.
     
     Return strict JSON matching the provided schema.
   `;
@@ -58,13 +64,56 @@ export const analyzeBodyMeasurements = async (
       ankle: { type: Type.NUMBER },
       torso_length: { type: Type.NUMBER },
 
+      // Transparency Fields
+      scaling_factor: { type: Type.NUMBER, description: "Calculated pixels per cm" },
+      estimated_height_cm: { type: Type.NUMBER, description: "AI estimated height based on proportions" },
+      thought_summary: { type: Type.STRING, description: "Natural language summary of reasoning" },
+      
+      // Landmarks
+      landmarks: {
+        type: Type.OBJECT,
+        properties: {
+          front: {
+             type: Type.OBJECT,
+             properties: {
+               head_top: { type: Type.OBJECT, properties: {x: {type: Type.NUMBER}, y: {type: Type.NUMBER}} },
+               neck_base: { type: Type.OBJECT, properties: {x: {type: Type.NUMBER}, y: {type: Type.NUMBER}} },
+               shoulder_left: { type: Type.OBJECT, properties: {x: {type: Type.NUMBER}, y: {type: Type.NUMBER}} },
+               shoulder_right: { type: Type.OBJECT, properties: {x: {type: Type.NUMBER}, y: {type: Type.NUMBER}} },
+               waist_left: { type: Type.OBJECT, properties: {x: {type: Type.NUMBER}, y: {type: Type.NUMBER}} },
+               waist_right: { type: Type.OBJECT, properties: {x: {type: Type.NUMBER}, y: {type: Type.NUMBER}} },
+               hip_left: { type: Type.OBJECT, properties: {x: {type: Type.NUMBER}, y: {type: Type.NUMBER}} },
+               hip_right: { type: Type.OBJECT, properties: {x: {type: Type.NUMBER}, y: {type: Type.NUMBER}} },
+               knee_left: { type: Type.OBJECT, properties: {x: {type: Type.NUMBER}, y: {type: Type.NUMBER}} },
+               knee_right: { type: Type.OBJECT, properties: {x: {type: Type.NUMBER}, y: {type: Type.NUMBER}} },
+               ankle_left: { type: Type.OBJECT, properties: {x: {type: Type.NUMBER}, y: {type: Type.NUMBER}} },
+               ankle_right: { type: Type.OBJECT, properties: {x: {type: Type.NUMBER}, y: {type: Type.NUMBER}} },
+               feet_center: { type: Type.OBJECT, properties: {x: {type: Type.NUMBER}, y: {type: Type.NUMBER}} }
+             }
+          },
+          side: {
+             type: Type.OBJECT,
+             properties: {
+                neck_point: { type: Type.OBJECT, properties: {x: {type: Type.NUMBER}, y: {type: Type.NUMBER}} },
+                chest_front: { type: Type.OBJECT, properties: {x: {type: Type.NUMBER}, y: {type: Type.NUMBER}} },
+                chest_back: { type: Type.OBJECT, properties: {x: {type: Type.NUMBER}, y: {type: Type.NUMBER}} },
+                waist_front: { type: Type.OBJECT, properties: {x: {type: Type.NUMBER}, y: {type: Type.NUMBER}} },
+                waist_back: { type: Type.OBJECT, properties: {x: {type: Type.NUMBER}, y: {type: Type.NUMBER}} },
+                hip_front: { type: Type.OBJECT, properties: {x: {type: Type.NUMBER}, y: {type: Type.NUMBER}} },
+                hip_back: { type: Type.OBJECT, properties: {x: {type: Type.NUMBER}, y: {type: Type.NUMBER}} },
+                knee: { type: Type.OBJECT, properties: {x: {type: Type.NUMBER}, y: {type: Type.NUMBER}} },
+                ankle: { type: Type.OBJECT, properties: {x: {type: Type.NUMBER}, y: {type: Type.NUMBER}} }
+             }
+          }
+        }
+      },
+
       // Meta
       confidence: { type: Type.NUMBER },
       notes: { type: Type.STRING },
-      thought_summary: { type: Type.STRING },
       body_shape: { type: Type.STRING },
       
-      // Technical / Transparency Data
+      // Technical / Transparency Data (Legacy/Detailed)
       technical_analysis: {
         type: Type.OBJECT,
         properties: {
@@ -114,35 +163,6 @@ export const analyzeBodyMeasurements = async (
         }
       },
 
-      // Landmarks
-      landmarks: {
-        type: Type.OBJECT,
-        properties: {
-          front: {
-             type: Type.OBJECT,
-             description: "Key landmarks in front view (normalized 0-1)",
-             properties: {
-               head_top: { type: Type.OBJECT, properties: {x: {type: Type.NUMBER}, y: {type: Type.NUMBER}} },
-               shoulder_left: { type: Type.OBJECT, properties: {x: {type: Type.NUMBER}, y: {type: Type.NUMBER}} },
-               shoulder_right: { type: Type.OBJECT, properties: {x: {type: Type.NUMBER}, y: {type: Type.NUMBER}} },
-               waist_left: { type: Type.OBJECT, properties: {x: {type: Type.NUMBER}, y: {type: Type.NUMBER}} },
-               waist_right: { type: Type.OBJECT, properties: {x: {type: Type.NUMBER}, y: {type: Type.NUMBER}} },
-               feet_center: { type: Type.OBJECT, properties: {x: {type: Type.NUMBER}, y: {type: Type.NUMBER}} }
-             }
-          },
-          side: {
-             type: Type.OBJECT,
-             description: "Key landmarks in side view (normalized 0-1)",
-             properties: {
-                neck_point: { type: Type.OBJECT, properties: {x: {type: Type.NUMBER}, y: {type: Type.NUMBER}} },
-                chest_point: { type: Type.OBJECT, properties: {x: {type: Type.NUMBER}, y: {type: Type.NUMBER}} },
-                waist_back: { type: Type.OBJECT, properties: {x: {type: Type.NUMBER}, y: {type: Type.NUMBER}} },
-                hip_point: { type: Type.OBJECT, properties: {x: {type: Type.NUMBER}, y: {type: Type.NUMBER}} }
-             }
-          }
-        }
-      },
-
       percentiles: {
         type: Type.OBJECT,
         properties: {
@@ -168,7 +188,8 @@ export const analyzeBodyMeasurements = async (
       "neck", "shoulder", "chest", "bicep", "wrist", "sleeve", 
       "waist", "hips", 
       "inseam", "outseam", "thigh", "calf", "ankle", 
-      "confidence", "technical_analysis", "quality_assessment"
+      "confidence", "technical_analysis", "quality_assessment",
+      "scaling_factor", "thought_summary"
     ],
   };
 
@@ -183,9 +204,9 @@ export const analyzeBodyMeasurements = async (
     };
 
     // Apply Thinking Config ONLY for 2.5 Flash
-    if (modelId === 'gemini-2.5-flash') {
+    if (modelId.includes('gemini-2.5-flash')) {
       config.thinkingConfig = { thinkingBudget: 12000 }; 
-      console.log("Using Thinking Budget: 12000");
+      console.log("Using Thinking Budget: 12000 for model:", modelId);
     }
 
     const response = await ai.models.generateContent({
@@ -215,9 +236,10 @@ export const analyzeBodyMeasurements = async (
             candidatesTokenCount: response.usageMetadata.candidatesTokenCount,
             totalTokenCount: response.usageMetadata.totalTokenCount
           };
+          result.token_count = response.usageMetadata.totalTokenCount;
         }
 
-        // Attach model name
+        // --- Persist model ID in the result object ---
         result.model_name = modelId;
 
         return result;

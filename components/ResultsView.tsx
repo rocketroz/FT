@@ -1,6 +1,7 @@
+
 import React, { useRef, useEffect, useState } from 'react';
 import { MeasurementResult, UserStats } from '../types';
-import { Share2, RefreshCcw, AlertCircle, CheckCircle2, Download, FileDown, Box, CloudUpload, Printer, Globe, Brain, Terminal, ChevronDown, ChevronUp, Ruler, Gauge, AlertTriangle, Cpu } from 'lucide-react';
+import { Share2, RefreshCcw, AlertCircle, CheckCircle2, Download, FileDown, Box, CloudUpload, Printer, Globe, Brain, Terminal, ChevronDown, ChevronUp, Ruler, Gauge, AlertTriangle, Cpu, Zap, Scan } from 'lucide-react';
 import { BodyVisualizer, BodyVisualizerHandle } from './BodyVisualizer';
 import { AuthForm } from './AuthForm';
 import { getUser, saveScanResult } from '../services/supabaseService';
@@ -96,31 +97,20 @@ export const ResultsView: React.FC<Props> = ({ results, stats, onReset, image, s
     );
   };
 
-  // Quality Indicator Component
-  const QualityBar = ({ label, score }: { label: string, score: number }) => (
-    <div className="mb-2">
-      <div className="flex justify-between text-[10px] uppercase font-bold text-slate-500 mb-1">
-        <span>{label}</span>
-        <span>{score}/10</span>
-      </div>
-      <div className="h-1.5 w-full bg-slate-800 rounded-full overflow-hidden">
-        <div 
-          className={`h-full ${score > 7 ? 'bg-green-500' : score > 4 ? 'bg-amber-500' : 'bg-red-500'}`} 
-          style={{ width: `${score * 10}%` }}
-        />
-      </div>
-    </div>
-  );
+  const isGemini25 = results.model_name?.includes('2.5');
 
   return (
     <div className="max-w-7xl mx-auto w-full animate-fade-in pb-12 print:pb-0 relative px-4">
       {/* Auth Overlay */}
       {showAuth && !isLoggedIn && (
-        <div className="absolute inset-0 z-50 bg-white/80 backdrop-blur-sm flex items-center justify-center h-screen fixed">
-           <div className="relative">
-             <button onClick={() => setShowAuth(false)} className="absolute -top-2 -right-2 bg-slate-200 rounded-full p-1 hover:bg-slate-300">
+        <div className="fixed inset-0 z-[60] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+           <div className="relative w-full max-w-sm">
+             <button 
+               onClick={() => setShowAuth(false)} 
+               className="absolute -top-12 right-0 text-white hover:text-slate-300 transition-colors"
+             >
                <span className="sr-only">Close</span>
-               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+               <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
              </button>
              <AuthForm onAuthSuccess={() => { setIsLoggedIn(true); setShowAuth(false); handleSaveToCloud(); }} />
            </div>
@@ -130,8 +120,20 @@ export const ResultsView: React.FC<Props> = ({ results, stats, onReset, image, s
       {/* Header Section */}
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 gap-4">
         <div>
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 flex-wrap">
             <h2 className="text-3xl font-bold text-slate-900">Analysis Complete</h2>
+            
+            {/* Prominent Model Badge */}
+            {results.model_name && (
+              <div className={`
+                flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-extrabold uppercase tracking-wide border shadow-sm
+                ${isGemini25 ? 'bg-amber-100 text-amber-700 border-amber-200' : 'bg-blue-100 text-blue-700 border-blue-200'}
+              `}>
+                 {isGemini25 ? <Zap size={14} fill="currentColor" /> : <Cpu size={14} />}
+                 {results.model_name}
+              </div>
+            )}
+
             <span className="bg-green-100 text-green-700 px-3 py-1 rounded-full text-sm font-bold border border-green-200">
               {results.confidence}% Confidence
             </span>
@@ -140,14 +142,6 @@ export const ResultsView: React.FC<Props> = ({ results, stats, onReset, image, s
             <p className="text-slate-500">
               {results.body_shape ? `Identified Body Shape: ${results.body_shape}` : 'Measurements derived from Gemini Vision Analysis'}
             </p>
-            {results.model_name && (
-              <span className="hidden sm:inline text-slate-300">|</span>
-            )}
-            {results.model_name && (
-              <span className="inline-flex items-center gap-1 text-xs font-bold text-slate-500 bg-slate-100 px-2 py-0.5 rounded border border-slate-200 w-fit">
-                 <Cpu size={12} /> {results.model_name}
-              </span>
-            )}
           </div>
         </div>
 
@@ -278,55 +272,42 @@ export const ResultsView: React.FC<Props> = ({ results, stats, onReset, image, s
                       <span className="text-slate-500">MODEL USED:</span> <span className="text-blue-400 font-bold">{results.model_name || 'Unknown'}</span>
                    </div>
 
-                   {/* Quality Scorecard */}
-                   {results.quality_assessment && (
-                     <div className="mb-6 bg-slate-800/50 p-3 rounded-lg border border-white/5">
-                        <h5 className="text-green-400 font-bold mb-3 flex items-center gap-2"><Gauge size={12}/> QUALITY SCORECARD</h5>
-                        <QualityBar label="Overall Confidence" score={results.confidence / 10} />
-                        <QualityBar label="Front Image Quality" score={results.quality_assessment.front_image_quality} />
-                        <QualityBar label="Side Image Quality" score={results.quality_assessment.side_image_quality} />
-                        <QualityBar label="Pose Consistency" score={results.quality_assessment.pose_consistency} />
-                        
-                        {results.quality_assessment.issues_detected && results.quality_assessment.issues_detected.length > 0 && (
-                          <div className="mt-3 text-red-400">
-                             <span className="font-bold text-[10px] uppercase">Detected Issues:</span>
-                             <ul className="list-disc pl-4 mt-1">
-                               {results.quality_assessment.issues_detected.map((issue, i) => (
-                                 <li key={i}>{issue}</li>
-                               ))}
-                             </ul>
-                          </div>
-                        )}
-                     </div>
-                   )}
+                   {/* Logic Check */}
+                   <div className="mb-6 bg-slate-800/50 p-3 rounded-lg border border-white/5">
+                      <h5 className="text-green-400 font-bold mb-3 flex items-center gap-2"><Scan size={12}/> LOGIC CHECK</h5>
+                      <div className="grid grid-cols-2 gap-2 mb-2">
+                         <div>
+                            <span className="block text-slate-500">Provided Height</span>
+                            <span className="block font-bold">{stats.height} cm</span>
+                         </div>
+                         <div>
+                            <span className="block text-slate-500">AI Est. Height</span>
+                            <span className={`block font-bold ${Math.abs((results.estimated_height_cm || 0) - stats.height) > 5 ? 'text-amber-400' : 'text-green-400'}`}>
+                              {results.estimated_height_cm || 'N/A'} cm
+                            </span>
+                         </div>
+                      </div>
+                      <div className="text-slate-500 border-t border-white/10 pt-2 mt-2">
+                         Scaling Factor: <span className="text-white">{results.scaling_factor?.toFixed(4)} px/cm</span>
+                      </div>
+                   </div>
 
-                   {/* Technical Analysis */}
-                   {results.technical_analysis && (
+                   {/* Reasoning Trace */}
+                   {results.thought_summary && (
                      <div className="mb-6">
-                        <h5 className="text-green-400 font-bold mb-2 flex items-center gap-2"><Ruler size={12}/> INTERMEDIATE CALCULATIONS</h5>
-                        
-                        <div className="mb-2 pl-2 border-l border-slate-700">
-                          <span className="block text-slate-500 font-bold">Scaling Factor</span>
-                          <span className="block">{results.technical_analysis.scaling.cm_per_pixel.toFixed(4)} cm/pixel</span>
-                          <span className="block text-[10px] text-slate-600">
-                            (Real Height {results.technical_analysis.scaling.real_height_cm}cm / {results.technical_analysis.scaling.pixel_height}px)
-                          </span>
-                        </div>
-
-                        {results.technical_analysis.formulas && Object.entries(results.technical_analysis.formulas).map(([key, formula]) => (
-                          <div key={key} className="mb-2 pl-2 border-l border-slate-700">
-                            <span className="block text-slate-500 font-bold capitalize">{key} Formula</span>
-                            <span className="block text-[10px] text-amber-200">{formula}</span>
-                            {results.technical_analysis?.raw_measurements?.[key] && (
-                               <span className="block text-[10px] text-slate-500 mt-0.5">
-                                 Width: {results.technical_analysis.raw_measurements[key].width_px}px | 
-                                 Depth: {results.technical_analysis.raw_measurements[key].depth_px}px
-                               </span>
-                            )}
-                          </div>
-                        ))}
+                       <h5 className="text-green-400 font-bold mb-1">// THOUGHT SUMMARY</h5>
+                       <p className="whitespace-pre-wrap leading-relaxed text-slate-400 border-l-2 border-green-400/30 pl-3">{results.thought_summary}</p>
                      </div>
                    )}
+
+                   {/* Landmarks Count */}
+                   <div className="mb-6">
+                      <h5 className="text-green-400 font-bold mb-1">// LANDMARKS DETECTED</h5>
+                      <div className="flex gap-4 text-slate-400">
+                         <span>Front: {results.landmarks?.front ? Object.keys(results.landmarks.front).length : 0} pts</span>
+                         <span>Side: {results.landmarks?.side ? Object.keys(results.landmarks.side).length : 0} pts</span>
+                      </div>
+                   </div>
 
                    {/* Token Usage */}
                    {results.usage_metadata && (
@@ -343,13 +324,6 @@ export const ResultsView: React.FC<Props> = ({ results, stats, onReset, image, s
                           <span className="block font-bold text-green-400">{results.usage_metadata.totalTokenCount}</span>
                           <span className="block text-[9px] text-slate-500 uppercase">Total Cost</span>
                         </div>
-                     </div>
-                   )}
-
-                   {results.thought_summary && (
-                     <div className="mb-4">
-                       <h5 className="text-green-400 font-bold mb-1">// REASONING TRACE</h5>
-                       <p className="whitespace-pre-wrap leading-relaxed text-slate-400">{results.thought_summary}</p>
                      </div>
                    )}
 
