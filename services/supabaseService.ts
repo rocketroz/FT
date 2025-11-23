@@ -1,3 +1,4 @@
+
 import { createClient, SupabaseClient, User } from '@supabase/supabase-js';
 import { UserStats, MeasurementResult, CaptureMetadata } from '../types';
 
@@ -123,6 +124,9 @@ export const saveScanResult = async (
     if (models.objBlob) objUrl = await uploadFile('scans', `${userId}/${scanId}/model_${timestamp}.obj`, models.objBlob);
     if (models.usdzBlob) usdzUrl = await uploadFile('scans', `${userId}/${scanId}/model_${timestamp}.usdz`, models.usdzBlob);
 
+    // Calculate approximate cost (Simulated based on typical token pricing)
+    const cost = (results.usage_metadata?.totalTokenCount || 0) * 0.000005; // Dummy multiplier
+
     // 2. Insert Main Measurement Record
     const { data: measurementData, error: measurementError } = await supabase
       .from('measurements')
@@ -133,6 +137,8 @@ export const saveScanResult = async (
         height: stats.height,
         weight: stats.weight || null,
         age: stats.age || null,
+        
+        // Measurements
         chest: results.chest,
         waist: results.waist,
         hips: results.hips,
@@ -140,9 +146,21 @@ export const saveScanResult = async (
         inseam: results.inseam,
         neck: results.neck,
         sleeve: results.sleeve,
-        full_json: results, // Keep a copy of full JSON for safety
+        
+        // Meta
         confidence_score: results.confidence,
-        capture_method: metadata.front.method
+        capture_method: metadata.front.method,
+        full_json: results, // Full Backup
+        
+        // Transparency Fields
+        model_name: results.model_name,
+        scaling_factor: results.scaling_factor || results.technical_analysis?.scaling.cm_per_pixel,
+        estimated_height_cm: results.estimated_height_cm,
+        thought_summary: results.thought_summary,
+        landmarks_json: results.landmarks || null,
+        token_count: results.usage_metadata?.totalTokenCount,
+        thinking_tokens: null, // Logic could be added here if usageMetadata split this out explicitly
+        api_cost_usd: cost
       }])
       .select()
       .single();
@@ -160,7 +178,7 @@ export const saveScanResult = async (
       promises.push(supabase.from('measurement_images').insert({ measurement_id: scanId, view_type: 'side', public_url: sideUrl, storage_path: `${userId}/${scanId}/side.jpg` }));
     }
 
-    // Table: measurement_calculations
+    // Table: measurement_calculations (Transparency Log)
     if (results.technical_analysis) {
       // Scaling
       promises.push(supabase.from('measurement_calculations').insert({
@@ -184,42 +202,6 @@ export const saveScanResult = async (
       });
     }
 
-    // Table: measurement_landmarks
-    if (results.landmarks) {
-      if (results.landmarks.front) {
-        Object.entries(results.landmarks.front).forEach(([name, coords]) => {
-          promises.push(supabase.from('measurement_landmarks').insert({
-            measurement_id: scanId,
-            view_type: 'front',
-            landmark_name: name,
-            x: coords.x,
-            y: coords.y
-          }));
-        });
-      }
-      if (results.landmarks.side) {
-        Object.entries(results.landmarks.side).forEach(([name, coords]) => {
-          promises.push(supabase.from('measurement_landmarks').insert({
-            measurement_id: scanId,
-            view_type: 'side',
-            landmark_name: name,
-            x: coords.x,
-            y: coords.y
-          }));
-        });
-      }
-    }
-
-    // Table: measurement_thoughts
-    if (results.thought_summary) {
-      promises.push(supabase.from('measurement_thoughts').insert({
-        measurement_id: scanId,
-        thought_summary: results.thought_summary,
-        detailed_reasoning: results.notes, // Using notes as secondary reasoning field
-        token_usage: results.usage_metadata || null
-      }));
-    }
-
     await Promise.allSettled(promises);
 
     return measurementData;
@@ -232,9 +214,6 @@ export const saveScanResult = async (
 export const getScans = async (limit = 20) => {
   if (!supabase) return [];
   
-  // Fetch from main table, we can join others if needed but for list view main is enough
-  // Note: In a real app we would use a join query, here we fetch main table 
-  // which has the 'full_json' column as a fallback for the admin view to parse.
   const { data, error } = await supabase
     .from('measurements')
     .select('*')
