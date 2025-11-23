@@ -1,8 +1,10 @@
 import { GoogleGenAI, Type, Schema } from "@google/genai";
 import { UserStats, MeasurementResult } from "../types";
+import { googleAIConfig } from "../config/env";
 
 // Initialize Gemini Client
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+// Note: In a real production app, API calls should go through a backend proxy to hide the key.
+const ai = new GoogleGenAI({ apiKey: googleAIConfig.apiKey });
 
 export const analyzeBodyMeasurements = async (
   frontImageBase64: string,
