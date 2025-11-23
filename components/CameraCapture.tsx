@@ -1,8 +1,9 @@
 import React, { useRef, useState, useCallback, useEffect } from 'react';
 import { ArrowLeft, Camera, Volume2, VolumeX, Upload, Image as ImageIcon, X, Check, Info, AlertTriangle, SwitchCamera } from 'lucide-react';
+import { CaptureMetadata } from '../types';
 
 interface Props {
-  onCapture: (imageBase64: string) => void;
+  onCapture: (imageBase64: string, metadata: CaptureMetadata) => void;
   onBack: () => void;
   mode: 'front' | 'side';
 }
@@ -88,8 +89,8 @@ export const CameraCapture: React.FC<Props> = ({ onCapture, onBack, mode }) => {
       const constraints: MediaStreamConstraints = {
         video: { 
           facingMode: facingMode,
-          width: { ideal: 1920 },
-          height: { ideal: 1080 },
+          width: { ideal: 3840 }, // Request 4K if available, fall back gracefully
+          height: { ideal: 2160 },
           // Attempt to request continuous focus in initial constraints (supported by some browsers)
           // @ts-ignore
           focusMode: 'continuous' 
@@ -226,8 +227,36 @@ export const CameraCapture: React.FC<Props> = ({ onCapture, onBack, mode }) => {
           ctx.scale(-1, 1);
         }
         ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-        const imageBase64 = canvas.toDataURL('image/jpeg', 0.9);
-        onCapture(imageBase64);
+        const imageBase64 = canvas.toDataURL('image/jpeg', 0.95); // Higher quality for analysis
+        
+        // Gather Metadata
+        let deviceLabel = 'unknown';
+        let trackSettings: MediaTrackSettings | undefined = undefined;
+        let capabilities: MediaTrackCapabilities | undefined = undefined;
+
+        if (streamRef.current) {
+          const track = streamRef.current.getVideoTracks()[0];
+          if (track) {
+            deviceLabel = track.label;
+            trackSettings = track.getSettings();
+            if (typeof track.getCapabilities === 'function') {
+              capabilities = track.getCapabilities();
+            }
+          }
+        }
+
+        const metadata: CaptureMetadata = {
+          method: 'camera',
+          facingMode: facingMode,
+          deviceLabel: deviceLabel,
+          userAgent: navigator.userAgent,
+          timestamp: new Date().toISOString(),
+          screenResolution: `${window.screen.width}x${window.screen.height}`,
+          cameraSettings: trackSettings,
+          capabilities: capabilities
+        };
+
+        onCapture(imageBase64, metadata);
       }
     }
   }, [onCapture, playShutterSound, facingMode]);
@@ -296,7 +325,15 @@ export const CameraCapture: React.FC<Props> = ({ onCapture, onBack, mode }) => {
 
   const confirmUpload = () => {
     if (uploadedImage) {
-      onCapture(uploadedImage);
+       const metadata: CaptureMetadata = {
+          method: 'upload',
+          facingMode: 'unknown',
+          deviceLabel: 'File Upload',
+          userAgent: navigator.userAgent,
+          timestamp: new Date().toISOString(),
+          screenResolution: `${window.screen.width}x${window.screen.height}`,
+        };
+      onCapture(uploadedImage, metadata);
     }
   };
 
@@ -401,18 +438,12 @@ export const CameraCapture: React.FC<Props> = ({ onCapture, onBack, mode }) => {
                 {/* AR Mask Overlay (Inverted Cutout) */}
                 <div className="absolute inset-0 pointer-events-none">
                   <svg className="w-full h-full" viewBox="0 0 100 200" preserveAspectRatio="none">
-                    {/* 
-                      fillRule="evenodd" allows us to create a "hole" in the rectangle.
-                      The outer path (M0 0 H100...) covers the screen.
-                      The inner path (PATH_FRONT/SIDE) is subtracted from it.
-                    */}
                     <path
                       d={`M0 0 H100 V200 H0 Z ${mode === 'front' ? PATH_FRONT : PATH_SIDE}`}
                       fill="rgba(0, 0, 0, 0.65)" 
                       fillRule="evenodd"
                     />
                     
-                    {/* The glowing outline of the shape to guide the user */}
                     <path 
                       d={mode === 'front' ? PATH_FRONT : PATH_SIDE}
                       fill="none" 
@@ -422,7 +453,6 @@ export const CameraCapture: React.FC<Props> = ({ onCapture, onBack, mode }) => {
                       className="drop-shadow-md"
                     />
                     
-                    {/* Center alignment line */}
                     <line 
                       x1="50" y1="0" 
                       x2="50" y2="200" 
@@ -560,7 +590,7 @@ export const CameraCapture: React.FC<Props> = ({ onCapture, onBack, mode }) => {
           </div>
         )}
 
-        {/* --- HELP OVERLAY (Visible on toggle) --- */}
+        {/* --- HELP OVERLAY --- */}
         {showGuide && (
           <div className="absolute inset-0 z-40 bg-black/90 backdrop-blur-md p-6 flex items-center justify-center animate-fade-in">
             <div className="max-w-sm w-full bg-slate-900 border border-slate-700 rounded-3xl p-6 relative shadow-2xl">
