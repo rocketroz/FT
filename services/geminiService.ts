@@ -24,7 +24,7 @@ export const analyzeApplicationLogs = async (logs: any[]): Promise<string> => {
   try {
     const response = await ai.models.generateContent({
       model: 'gemini-3-pro-preview',
-      contents: { text: prompt }
+      contents: prompt // Fixed: Pass prompt string directly or use strict Content array format
     });
     return response.text || "No analysis generated.";
   } catch (e: any) {

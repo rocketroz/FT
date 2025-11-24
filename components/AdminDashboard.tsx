@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { getScans, supabase } from '../services/supabaseService';
 import { analyzeApplicationLogs } from '../services/geminiService';
-import { ArrowLeft, RefreshCw, Calendar, User, Ruler, FileText, CheckCircle, AlertTriangle, Cpu, Terminal, Bug, Smartphone, Search } from 'lucide-react';
+import { ArrowLeft, RefreshCw, Calendar, User, Ruler, FileText, CheckCircle, AlertTriangle, Cpu, Terminal, Bug, Smartphone, Search, Filter, X } from 'lucide-react';
 
 interface Props {
   onBack: () => void;
@@ -13,6 +13,7 @@ export const AdminDashboard: React.FC<Props> = ({ onBack }) => {
   const [logs, setLogs] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedScan, setSelectedScan] = useState<any | null>(null);
+  const [logFilter, setLogFilter] = useState<string | null>(null);
   
   // Analysis State
   const [analyzingLogs, setAnalyzingLogs] = useState(false);
@@ -28,11 +29,18 @@ export const AdminDashboard: React.FC<Props> = ({ onBack }) => {
   const fetchLogs = async () => {
     if (!supabase) return;
     setLoading(true);
-    const { data, error } = await supabase
+    
+    let query = supabase
       .from('debug_logs')
       .select('*')
       .order('created_at', { ascending: false })
       .limit(100);
+      
+    if (logFilter) {
+      query = query.eq('session_id', logFilter);
+    }
+    
+    const { data, error } = await query;
     
     if (data) setLogs(data);
     setLoading(false);
@@ -50,7 +58,7 @@ export const AdminDashboard: React.FC<Props> = ({ onBack }) => {
   useEffect(() => {
     if (activeTab === 'scans') fetchScans();
     else fetchLogs();
-  }, [activeTab]);
+  }, [activeTab, logFilter]); // Re-fetch when filter changes
 
   const getMeasurementJson = (scan: any) => {
     // Handling potential nested JSON structure differences depending on how it was saved
@@ -88,10 +96,11 @@ export const AdminDashboard: React.FC<Props> = ({ onBack }) => {
                  className={`px-4 py-1.5 rounded text-sm font-bold transition-all flex items-center gap-2 ${activeTab === 'logs' ? 'bg-slate-100 text-slate-900' : 'text-slate-500 hover:text-slate-700'}`}
                >
                  <Bug size={14}/> Live Logs
+                 {logFilter && <span className="w-2 h-2 rounded-full bg-blue-500"></span>}
                </button>
              </div>
 
-             <button onClick={activeTab === 'scans' ? fetchScans : fetchLogs} className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg font-bold hover:bg-blue-700 transition-colors">
+             <button onClick={activeTab === 'scans' ? fetchScans : () => fetchLogs()} className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg font-bold hover:bg-blue-700 transition-colors">
                 <RefreshCw size={18} className={loading ? 'animate-spin' : ''} /> Refresh
              </button>
           </div>
@@ -155,13 +164,23 @@ export const AdminDashboard: React.FC<Props> = ({ onBack }) => {
                         <h3 className="font-bold text-slate-800">Scan Details</h3>
                         <p className="text-xs text-slate-500 font-mono">{selectedScan.id}</p>
                       </div>
-                      <div className="flex gap-2 text-sm">
-                         {selectedScan.public_url ? (
-                           // If images are stored with URL directly on measurement object (legacy)
-                           <a href={selectedScan.public_url} target="_blank" rel="noreferrer" className="text-blue-600 hover:underline">Front Img</a>
-                         ) : (
-                           <span className="text-slate-400 italic">Images linked in sub-table</span>
+                      <div className="flex gap-2">
+                         {/* DEBUG BUTTON */}
+                         {selectedScan.session_id && (
+                           <button 
+                              onClick={() => { setLogFilter(selectedScan.session_id); setActiveTab('logs'); }}
+                              className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-white text-xs font-bold rounded flex items-center gap-2 transition-colors"
+                           >
+                              <Bug size={14} /> Debug Session
+                           </button>
                          )}
+                         <div className="flex gap-2 text-sm ml-2 items-center">
+                            {selectedScan.public_url ? (
+                              <a href={selectedScan.public_url} target="_blank" rel="noreferrer" className="text-blue-600 hover:underline">Front Img</a>
+                            ) : (
+                              <span className="text-slate-400 italic">Images linked below</span>
+                            )}
+                         </div>
                       </div>
                    </div>
                    
@@ -273,15 +292,25 @@ export const AdminDashboard: React.FC<Props> = ({ onBack }) => {
             {/* Logs Stream (3 cols) */}
             <div className="lg:col-span-3 bg-slate-900 rounded-xl shadow-lg border border-slate-800 flex flex-col overflow-hidden">
                <div className="p-3 bg-slate-800 border-b border-slate-700 flex justify-between items-center">
-                 <h3 className="text-green-400 font-mono text-sm font-bold flex items-center gap-2">
-                   <Terminal size={14}/> Remote Logs Stream
-                 </h3>
+                 <div className="flex items-center gap-3">
+                    <h3 className="text-green-400 font-mono text-sm font-bold flex items-center gap-2">
+                      <Terminal size={14}/> Remote Logs Stream
+                    </h3>
+                    {logFilter && (
+                      <div className="flex items-center gap-2 bg-blue-900/50 px-2 py-0.5 rounded text-xs text-blue-200 border border-blue-800">
+                         <Filter size={10} /> Session: {logFilter.substring(0,8)}...
+                         <button onClick={() => setLogFilter(null)} className="hover:text-white"><X size={12} /></button>
+                      </div>
+                    )}
+                 </div>
                  <span className="text-[10px] text-slate-500 uppercase tracking-widest">{logs.length} events</span>
                </div>
                
                <div className="flex-1 overflow-y-auto p-4 space-y-2 font-mono text-xs">
                   {logs.length === 0 && (
-                    <div className="text-slate-500 text-center mt-10">Waiting for logs from mobile devices...</div>
+                    <div className="text-slate-500 text-center mt-10">
+                       {logFilter ? "No logs found for this session." : "Waiting for logs from mobile devices..."}
+                    </div>
                   )}
                   {logs.map((log) => (
                     <div key={log.id} className="group hover:bg-white/5 p-1 rounded transition-colors flex gap-3">
@@ -332,7 +361,7 @@ export const AdminDashboard: React.FC<Props> = ({ onBack }) => {
                   ) : (
                     <div className="flex-1 flex flex-col items-center justify-center text-center text-slate-400 p-4">
                        <Search size={32} className="mb-2 opacity-20"/>
-                       <p className="text-xs">Click the button below to have Gemini analyze the recent logs.</p>
+                       <p className="text-xs">Click the button below to have Gemini analyze the {logFilter ? "filtered" : "recent"} logs.</p>
                     </div>
                   )}
 

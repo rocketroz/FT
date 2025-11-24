@@ -1,27 +1,58 @@
-
 import { createClient, SupabaseClient, User } from '@supabase/supabase-js';
 import { UserStats, MeasurementResult, CaptureMetadata } from '../types';
+import { logger } from './logger';
 
 const STORAGE_KEY = 'fit_twin_supabase_config';
 
 export let supabase: SupabaseClient | null = null;
 
+// Helper to safely access env vars across different build tools (Vite, CRA, Next.js)
+const getEnvVar = (key: string): string | undefined => {
+  // 1. Try standard process.env (Node/Webpack/CRA)
+  if (typeof process !== 'undefined' && process.env) {
+    // Check direct, REACT_APP_, and VITE_ prefixes
+    const direct = process.env[key];
+    const reactApp = process.env[`REACT_APP_${key}`];
+    const vite = process.env[`VITE_${key}`];
+    if (direct) return direct;
+    if (reactApp) return reactApp;
+    if (vite) return vite;
+  }
+
+  // 2. Try import.meta.env (Vite native)
+  // @ts-ignore
+  if (typeof import.meta !== 'undefined' && import.meta.env) {
+    // @ts-ignore
+    const metaDirect = import.meta.env[key];
+    // @ts-ignore
+    const metaVite = import.meta.env[`VITE_${key}`];
+    if (metaDirect) return metaDirect;
+    if (metaVite) return metaVite;
+  }
+
+  return undefined;
+};
+
 // Initialize Supabase Logic
 export const initSupabase = (): boolean => {
   try {
-    const envUrl = process.env.SUPABASE_URL;
-    const envKey = process.env.SUPABASE_ANON_KEY;
+    // Check Environment Variables First (Vercel/Deployment)
+    const envUrl = getEnvVar('SUPABASE_URL');
+    const envKey = getEnvVar('SUPABASE_ANON_KEY');
 
     if (envUrl && envKey) {
       supabase = createClient(envUrl, envKey);
+      // logger.info("Supabase connected via Environment Variables");
       return true;
     }
 
+    // Fallback to Local Storage (Manual Settings)
     const stored = localStorage.getItem(STORAGE_KEY);
     if (stored) {
       const { url, key } = JSON.parse(stored);
       if (url && key) {
         supabase = createClient(url, key);
+        // logger.info("Supabase connected via Local Settings");
         return true;
       }
     }
@@ -156,6 +187,7 @@ export const saveScanResult = async (
       const fullPayload = {
         id: scanId,
         user_id: user ? user.id : null,
+        session_id: logger.getSessionId(), // LINK TO DEBUG LOGS
         gender: stats.gender || 'Not Specified',
         height: stats.height,
         weight: stats.weight || null,
@@ -166,7 +198,6 @@ export const saveScanResult = async (
         waist: results.waist,
         hips: results.hips,
         shoulder: results.shoulder,
-        inseam: results.inseam,
         neck: results.neck,
         sleeve: results.sleeve,
         

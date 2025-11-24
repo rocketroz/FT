@@ -29,12 +29,41 @@ const App: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false); 
 
-  // Initialize Logger
+  // Initialize Logger & Global Error Handlers
   useEffect(() => {
+    // Log session start
+    const sessId = logger.getSessionId();
     logger.info("Application mounted", { 
-      sessionId: logger.getSessionId(),
-      screen: `${window.innerWidth}x${window.innerHeight}`
+      sessionId: sessId,
+      screen: `${window.innerWidth}x${window.innerHeight}`,
+      userAgent: navigator.userAgent
     });
+
+    // Capture global uncaught exceptions (crashes)
+    const handleGlobalError = (event: ErrorEvent) => {
+      logger.error("Uncaught Application Crash", {
+        message: event.message,
+        filename: event.filename,
+        lineno: event.lineno,
+        colno: event.colno,
+        error: event.error?.stack || event.error
+      });
+    };
+
+    // Capture unhandled promise rejections (network/async failures)
+    const handlePromiseRejection = (event: PromiseRejectionEvent) => {
+      logger.error("Unhandled Promise Rejection", {
+        reason: event.reason?.message || event.reason
+      });
+    };
+
+    window.addEventListener('error', handleGlobalError);
+    window.addEventListener('unhandledrejection', handlePromiseRejection);
+
+    return () => {
+      window.removeEventListener('error', handleGlobalError);
+      window.removeEventListener('unhandledrejection', handlePromiseRejection);
+    };
   }, []);
 
   // Load preferred model from local storage on mount

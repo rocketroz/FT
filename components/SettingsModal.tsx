@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { X, Save, Database, CheckCircle, AlertCircle, Shield, Cpu, Activity, Code, Copy, ExternalLink } from 'lucide-react';
+import { X, Save, Database, CheckCircle, AlertCircle, Shield, Cpu, Activity, Code, Copy, ExternalLink, CloudLightning } from 'lucide-react';
 import { configureSupabase, isSupabaseConnected } from '../services/supabaseService';
 
 interface Props {
@@ -14,6 +14,7 @@ export const SettingsModal: React.FC<Props> = ({ isOpen, onClose, onNavigateToAd
   const [url, setUrl] = useState('');
   const [key, setKey] = useState('');
   const [connected, setConnected] = useState(false);
+  const [usingEnvVars, setUsingEnvVars] = useState(false);
   const [saved, setSaved] = useState(false);
   const [showSchema, setShowSchema] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -23,13 +24,20 @@ export const SettingsModal: React.FC<Props> = ({ isOpen, onClose, onNavigateToAd
 
   useEffect(() => {
     if (isOpen) {
-      setConnected(isSupabaseConnected());
+      const isConnected = isSupabaseConnected();
+      setConnected(isConnected);
+      
       const stored = localStorage.getItem('fit_twin_supabase_config');
       if (stored) {
         const config = JSON.parse(stored);
         setUrl(config.url || '');
         setKey(config.key || '');
+        setUsingEnvVars(false);
+      } else if (isConnected) {
+        // Connected but no local storage means Env Vars
+        setUsingEnvVars(true);
       }
+      
       setSelectedModel(currentModel);
     }
   }, [isOpen, currentModel]);
@@ -38,6 +46,7 @@ export const SettingsModal: React.FC<Props> = ({ isOpen, onClose, onNavigateToAd
     e.preventDefault();
     const success = configureSupabase(url, key);
     setConnected(success);
+    setUsingEnvVars(false); // If they manually save, they override env vars logic in UI state context conceptually
     
     // Commit model change
     onModelChange(selectedModel);
@@ -56,6 +65,7 @@ export const SettingsModal: React.FC<Props> = ({ isOpen, onClose, onNavigateToAd
 -- 1. Create Tables (Idempotent)
 create table if not exists public.measurements (
   id uuid primary key,
+  session_id text, -- Link to debug_logs for troubleshooting
   user_id uuid, -- references auth.users(id) if using auth
   created_at timestamptz default now(),
   
@@ -258,38 +268,45 @@ create policy "Public Select Scans" on storage.objects for select using ( bucket
               <div className={`p-3 rounded-lg flex items-start gap-3 text-sm mb-4 ${connected ? 'bg-green-50 text-green-800' : 'bg-slate-50 text-slate-600'}`}>
                 {connected ? <CheckCircle size={18} className="mt-0.5 shrink-0" /> : <AlertCircle size={18} className="mt-0.5 shrink-0" />}
                 <div>
-                  <span className="font-bold block">{connected ? 'Connected to Supabase' : 'Not Connected'}</span>
+                  <span className="font-bold block flex items-center gap-2">
+                    {connected ? 'Connected to Supabase' : 'Not Connected'}
+                    {usingEnvVars && <span className="text-[9px] bg-green-200 text-green-800 px-1.5 py-0.5 rounded flex items-center gap-1"><CloudLightning size={10}/> ENV</span>}
+                  </span>
                   <p className="text-xs opacity-80 mt-1">
-                    {connected 
-                      ? 'Cloud saving enabled.' 
-                      : 'Enter details to enable cloud saving.'}
+                    {usingEnvVars 
+                      ? 'Using configuration from Environment Variables (Vercel).'
+                      : connected 
+                        ? 'Cloud saving enabled via custom settings.' 
+                        : 'Enter details to enable cloud saving.'}
                   </p>
                 </div>
               </div>
 
-              <div className="space-y-3">
-                <div>
-                  <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Project URL</label>
-                  <input 
-                    type="text" 
-                    value={url}
-                    onChange={(e) => setUrl(e.target.value)}
-                    placeholder="https://xyz.supabase.co"
-                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-xs font-mono text-slate-700"
-                  />
-                </div>
+              {!usingEnvVars && (
+                <div className="space-y-3">
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Project URL</label>
+                    <input 
+                      type="text" 
+                      value={url}
+                      onChange={(e) => setUrl(e.target.value)}
+                      placeholder="https://xyz.supabase.co"
+                      className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-xs font-mono text-slate-700"
+                    />
+                  </div>
 
-                <div>
-                  <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Anon Key</label>
-                  <input 
-                    type="password" 
-                    value={key}
-                    onChange={(e) => setKey(e.target.value)}
-                    placeholder="eyJh..."
-                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-xs font-mono text-slate-700"
-                  />
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Anon Key</label>
+                    <input 
+                      type="password" 
+                      value={key}
+                      onChange={(e) => setKey(e.target.value)}
+                      placeholder="eyJh..."
+                      className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-xs font-mono text-slate-700"
+                    />
+                  </div>
                 </div>
-              </div>
+              )}
             </div>
 
             {/* Schema Helper */}
