@@ -1,5 +1,5 @@
 import { createClient, SupabaseClient, User, Session } from '@supabase/supabase-js';
-import { UserStats, MeasurementResult, CaptureMetadata } from '../types';
+import { UserStats, MeasurementResult } from '../types';
 import { logger } from './logger';
 
 const STORAGE_KEY = 'fit_twin_supabase_config';
@@ -7,21 +7,19 @@ const STORAGE_KEY = 'fit_twin_supabase_config';
 export let supabase: SupabaseClient | null = null;
 
 // --- Connection Event System ---
-type ConnectionListener = (isConnected: boolean) => void;
-const connectionListeners: ConnectionListener[] = [];
+const connectionListeners = new Set<(isConnected: boolean) => void>();
 
-export const onSupabaseConnectionChange = (callback: ConnectionListener) => {
-  connectionListeners.push(callback);
-  // Fire immediately with current state
+export const onSupabaseConnectionChange = (callback: (isConnected: boolean) => void) => {
+  connectionListeners.add(callback);
+  // Fire immediately with current state to prevent stale UI
   callback(!!supabase);
   return () => {
-    const index = connectionListeners.indexOf(callback);
-    if (index > -1) connectionListeners.splice(index, 1);
+    connectionListeners.delete(callback);
   };
 };
 
 const notifyListeners = (status: boolean) => {
-  connectionListeners.forEach(l => l(status));
+  connectionListeners.forEach(cb => cb(status));
 };
 
 // Helper to check if localStorage is writable
@@ -40,28 +38,30 @@ export const getSupabaseConfig = () => {
   let url = '';
   let key = '';
 
+  // 1. Try Vite / Import Meta (Modern Bundlers)
   try {
     // @ts-ignore
     if (typeof import.meta !== 'undefined' && import.meta.env) {
       // @ts-ignore
-      url = import.meta.env.VITE_SUPABASE_URL || import.meta.env.SUPABASE_URL || import.meta.env.REACT_APP_SUPABASE_URL;
+      url = import.meta.env.VITE_SUPABASE_URL || import.meta.env.SUPABASE_URL || import.meta.env.REACT_APP_SUPABASE_URL || '';
       // @ts-ignore
-      key = import.meta.env.VITE_SUPABASE_ANON_KEY || import.meta.env.SUPABASE_ANON_KEY || import.meta.env.REACT_APP_SUPABASE_ANON_KEY;
+      key = import.meta.env.VITE_SUPABASE_ANON_KEY || import.meta.env.SUPABASE_ANON_KEY || import.meta.env.REACT_APP_SUPABASE_ANON_KEY || '';
     }
   } catch (e) { /* Ignore */ }
 
+  // 2. Try Process Env (Node/Legacy/Webpack fallback)
   if (!url || !key) {
     try {
       if (typeof process !== 'undefined' && process.env) {
         url = process.env.VITE_SUPABASE_URL || 
               process.env.NEXT_PUBLIC_SUPABASE_URL || 
               process.env.REACT_APP_SUPABASE_URL || 
-              process.env.SUPABASE_URL || '';
+              process.env.SUPABASE_URL || url;
               
         key = process.env.VITE_SUPABASE_ANON_KEY || 
               process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 
               process.env.REACT_APP_SUPABASE_ANON_KEY || 
-              process.env.SUPABASE_ANON_KEY || '';
+              process.env.SUPABASE_ANON_KEY || key;
       }
     } catch (e) { /* Ignore */ }
   }
@@ -70,6 +70,9 @@ export const getSupabaseConfig = () => {
 };
 
 export const initSupabase = (): boolean => {
+  // If already initialized, just return true
+  if (supabase) return true;
+
   try {
     const options = isStorageAvailable() 
       ? {} 
@@ -81,23 +84,24 @@ export const initSupabase = (): boolean => {
           } 
         };
 
-    const { url: envUrl, key: envKey } = getSupabaseConfig();
-
-    if (envUrl && envKey) {
+    // 1. Priority: Check Environment Variables
+    const config = getSupabaseConfig();
+    if (config.url && config.key) {
       console.log("[Supabase] Initializing from Environment Variables");
-      supabase = createClient(envUrl, envKey, options);
+      supabase = createClient(config.url, config.key, options);
       notifyListeners(true);
       return true;
     }
 
+    // 2. Secondary: Check Local Storage (User Manual Config)
     if (isStorageAvailable()) {
       try {
         const stored = localStorage.getItem(STORAGE_KEY);
         if (stored) {
-          const { url, key } = JSON.parse(stored);
-          if (url && key) {
+          const parsed = JSON.parse(stored);
+          if (parsed && parsed.url && parsed.key) {
             console.log("[Supabase] Initializing from LocalStorage");
-            supabase = createClient(url, key, options);
+            supabase = createClient(parsed.url, parsed.key, options);
             notifyListeners(true);
             return true;
           }
@@ -107,9 +111,9 @@ export const initSupabase = (): boolean => {
       }
     }
     
-    // Even if no config found, checking returning false is enough
+    // Check if we failed
     if (!supabase) {
-      console.warn("[Supabase] No configuration found.");
+      // Don't log warning as error, it just means not configured yet
       notifyListeners(false);
       return false;
     }
@@ -119,13 +123,14 @@ export const initSupabase = (): boolean => {
   } catch (e) {
     console.error("[Supabase] Init error", e);
     notifyListeners(false);
+    return false;
   }
-  
-  return false;
 };
 
 export const configureSupabase = (url: string, key: string) => {
   try {
+    if (!url || !key) throw new Error("URL and Key are required");
+
     const options = isStorageAvailable() 
       ? {} 
       : { auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: true } };
@@ -158,33 +163,33 @@ export const isSupabaseConnected = (): boolean => {
 export const signUp = async (email: string, password: string) => {
   if (!supabase && !initSupabase()) return { user: null, session: null, error: { message: "Database not connected" } };
   
-  const { data, error } = await supabase!.auth.signUp({
+  const result = await supabase!.auth.signUp({
     email,
     password,
   });
-  return { user: data.user, session: data.session, error };
+  return { user: result.data.user, session: result.data.session, error: result.error };
 };
 
 export const signIn = async (email: string, password: string) => {
   if (!supabase && !initSupabase()) return { user: null, session: null, error: { message: "Database not connected" } };
 
-  const { data, error } = await supabase!.auth.signInWithPassword({
+  const result = await supabase!.auth.signInWithPassword({
     email,
     password,
   });
-  return { user: data.user, session: data.session, error };
+  return { user: result.data.user, session: result.data.session, error: result.error };
 };
 
 export const signInWithGoogle = async () => {
-  if (!supabase && !initSupabase()) return { error: { message: "Database not connected" } };
+  if (!supabase && !initSupabase()) return { data: null, error: { message: "Database not connected" } };
 
-  const { data, error } = await supabase!.auth.signInWithOAuth({
+  const result = await supabase!.auth.signInWithOAuth({
     provider: 'google',
     options: {
       redirectTo: window.location.origin,
     },
   });
-  return { data, error };
+  return { data: result.data, error: result.error };
 };
 
 export const signOut = async () => {
@@ -229,8 +234,8 @@ const uploadImage = async (userId: string, imageBase64: string, type: 'front' | 
       return null;
     }
 
-    const { data: { publicUrl } } = supabase.storage.from('scans').getPublicUrl(fileName);
-    return publicUrl;
+    const result = supabase.storage.from('scans').getPublicUrl(fileName);
+    return result.data.publicUrl;
   } catch (e) {
     console.error("Upload exception:", e);
     return null;
@@ -256,7 +261,7 @@ export const saveScanResult = async (
     const sideUrl = await uploadImage(userId, images.side, 'side');
 
     // 2. Save Main Record
-    const { data: measurementData, error: measurementError } = await supabase!
+    const insertResult = await supabase!
       .from('measurements')
       .insert({
         user_id: user ? user.id : null,
@@ -290,7 +295,9 @@ export const saveScanResult = async (
       .select()
       .single();
 
-    if (measurementError) throw measurementError;
+    if (insertResult.error) throw insertResult.error;
+
+    const measurementData = insertResult.data;
 
     // 3. Save Image References
     if (measurementData) {

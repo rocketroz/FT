@@ -6,7 +6,7 @@ import { ResultsView } from './components/ResultsView';
 import { SettingsModal } from './components/SettingsModal'; 
 import { AdminDashboard } from './components/AdminDashboard';
 import { analyzeBodyMeasurements } from './services/geminiService';
-import { saveScanResult, isSupabaseConnected } from './services/supabaseService';
+import { saveScanResult, isSupabaseConnected, initSupabase } from './services/supabaseService';
 import { logger } from './services/logger';
 import { ScanLine, ArrowRight, Activity, Settings } from 'lucide-react';
 
@@ -29,8 +29,11 @@ const App: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false); 
 
-  // Initialize Logger & Global Error Handlers
+  // Initialize Logger & Global Error Handlers & Supabase
   useEffect(() => {
+    // Attempt to init Supabase from Env/Storage on mount
+    initSupabase();
+
     // Log session start
     const sessId = logger.getSessionId();
     logger.info("Application mounted", { 
@@ -344,6 +347,7 @@ const App: React.FC = () => {
               sideImage={sideImage}
               frontMeta={frontMeta}
               sideMeta={sideMeta}
+              onOpenSettings={() => setIsSettingsOpen(true)}
             />
           </div>
         )}

@@ -1,22 +1,39 @@
 import React, { useState, useEffect } from 'react';
-import { signIn, signUp, signInWithGoogle, isSupabaseConnected } from '../services/supabaseService';
-import { Mail, Lock, LogIn, UserPlus, AlertTriangle } from 'lucide-react';
+import { signIn, signUp, signInWithGoogle, isSupabaseConnected, onSupabaseConnectionChange, initSupabase } from '../services/supabaseService';
+import { Mail, Lock, LogIn, UserPlus, AlertTriangle, Settings } from 'lucide-react';
 
 interface Props {
   onAuthSuccess: () => void;
+  onOpenSettings?: () => void;
 }
 
-export const AuthForm: React.FC<Props> = ({ onAuthSuccess }) => {
+export const AuthForm: React.FC<Props> = ({ onAuthSuccess, onOpenSettings }) => {
   const [isLogin, setIsLogin] = useState(true);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
-  const [isConnected, setIsConnected] = useState(true);
+  
+  // Lazy init to capture connection status immediately on mount
+  const [isConnected, setIsConnected] = useState(() => isSupabaseConnected());
 
   useEffect(() => {
-    setIsConnected(isSupabaseConnected());
+    // Subscribe to updates. The callback fires immediately with current state,
+    // ensuring we are always in sync.
+    const unsubscribe = onSupabaseConnectionChange((connected) => {
+      setIsConnected(connected);
+      if (connected) setError(null);
+    });
+
+    // Attempt init if not connected
+    if (!isSupabaseConnected()) {
+      initSupabase();
+    }
+
+    return () => {
+      unsubscribe();
+    };
   }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -36,11 +53,9 @@ export const AuthForm: React.FC<Props> = ({ onAuthSuccess }) => {
         
         if (user) {
            if (!session) {
-             // Email confirmation is required by Supabase default settings
              setMessage(`Account created! Please check your email (${email}) to confirm your account before signing in.`);
-             setIsLogin(true); // Switch back to login mode so they are ready
+             setIsLogin(true); 
            } else {
-             // If auto-confirm is on (rare for prod), we log them in
              setMessage("Account created successfully!");
              onAuthSuccess();
            }
@@ -57,11 +72,12 @@ export const AuthForm: React.FC<Props> = ({ onAuthSuccess }) => {
     setLoading(true);
     setError(null);
     
-    // Check connection first
     if (!isSupabaseConnected()) {
-      setError("Database Disconnected. Please configure Supabase in Settings.");
-      setLoading(false);
-      return;
+      if (!initSupabase()) {
+        setError("Database Disconnected. Please configure Settings.");
+        setLoading(false);
+        return;
+      }
     }
 
     try {
@@ -69,7 +85,6 @@ export const AuthForm: React.FC<Props> = ({ onAuthSuccess }) => {
       if (error) {
         setError(error.message);
       }
-      // Note: If successful, it redirects, so we don't need to unset loading usually
     } catch (e: any) {
       setError(e.message || "Google Sign In failed");
       setLoading(false);
@@ -77,7 +92,7 @@ export const AuthForm: React.FC<Props> = ({ onAuthSuccess }) => {
   };
 
   return (
-    <div className="bg-white p-6 rounded-xl shadow-lg border border-slate-200 w-full">
+    <div className="bg-white p-6 rounded-xl shadow-lg border border-slate-200 w-full animate-fade-in">
       <h3 className="text-xl font-bold text-slate-900 mb-2">
         {isLogin ? 'Sign In to Save' : 'Create Account'}
       </h3>
@@ -86,9 +101,31 @@ export const AuthForm: React.FC<Props> = ({ onAuthSuccess }) => {
       </p>
 
       {!isConnected && (
-        <div className="bg-amber-50 text-amber-700 p-3 rounded-lg text-sm mb-4 font-medium flex items-center gap-2 border border-amber-200">
-           <AlertTriangle size={16} />
-           <span>Database Disconnected. Check Settings.</span>
+        <div className="bg-amber-50 text-amber-800 p-4 rounded-lg text-sm mb-4 border border-amber-200 flex flex-col gap-2">
+           <div className="flex items-center gap-2 font-bold">
+             <AlertTriangle size={16} />
+             <span>Database Disconnected</span>
+           </div>
+           <div className="text-amber-700/80 text-xs">
+             The app needs a database connection to save results.
+           </div>
+           
+           <div className="flex gap-2 mt-1">
+             <button 
+               onClick={() => initSupabase()} 
+               className="px-3 py-1.5 bg-amber-100 hover:bg-amber-200 text-amber-800 rounded text-xs font-bold transition-colors"
+             >
+               Retry
+             </button>
+             {onOpenSettings && (
+               <button 
+                 onClick={onOpenSettings} 
+                 className="px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded text-xs font-bold flex items-center gap-1 transition-colors"
+               >
+                 <Settings size={12} /> Configure
+               </button>
+             )}
+           </div>
         </div>
       )}
 

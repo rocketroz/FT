@@ -1,4 +1,3 @@
-
 import React, { useRef, useEffect, useState } from 'react';
 import { MeasurementResult, UserStats } from '../types';
 import { Share2, RefreshCcw, AlertCircle, CheckCircle2, Download, FileDown, Box, CloudUpload, Printer, Globe, Brain, Terminal, ChevronDown, ChevronUp, Ruler, Gauge, AlertTriangle, Cpu, Zap, Scan, Layers } from 'lucide-react';
@@ -14,9 +13,10 @@ interface Props {
   frontMeta: any;
   sideMeta: any;
   sideImage: string;
+  onOpenSettings?: () => void;
 }
 
-export const ResultsView: React.FC<Props> = ({ results, stats, onReset, image, sideImage, frontMeta, sideMeta }) => {
+export const ResultsView: React.FC<Props> = ({ results, stats, onReset, image, sideImage, frontMeta, sideMeta, onOpenSettings }) => {
   const visualizerRef = useRef<BodyVisualizerHandle>(null);
   const printImageRef = useRef<HTMLImageElement>(null);
   const [showAuth, setShowAuth] = useState(false);
@@ -114,7 +114,10 @@ export const ResultsView: React.FC<Props> = ({ results, stats, onReset, image, s
                <span className="sr-only">Close</span>
                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
              </button>
-             <AuthForm onAuthSuccess={() => { setIsLoggedIn(true); setShowAuth(false); handleSaveToCloud(); }} />
+             <AuthForm 
+               onAuthSuccess={() => { setIsLoggedIn(true); setShowAuth(false); handleSaveToCloud(); }} 
+               onOpenSettings={onOpenSettings}
+             />
            </div>
         </div>
       )}
