@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { AppStep, UserStats, MeasurementResult, CaptureMetadata } from './types';
 import { StatsForm } from './components/StatsForm';
@@ -8,6 +7,7 @@ import { SettingsModal } from './components/SettingsModal';
 import { AdminDashboard } from './components/AdminDashboard';
 import { analyzeBodyMeasurements } from './services/geminiService';
 import { saveScanResult, isSupabaseConnected } from './services/supabaseService';
+import { logger } from './services/logger';
 import { ScanLine, ArrowRight, Activity, Settings } from 'lucide-react';
 
 const App: React.FC = () => {
@@ -29,6 +29,14 @@ const App: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false); 
 
+  // Initialize Logger
+  useEffect(() => {
+    logger.info("Application mounted", { 
+      sessionId: logger.getSessionId(),
+      screen: `${window.innerWidth}x${window.innerHeight}`
+    });
+  }, []);
+
   // Load preferred model from local storage on mount
   useEffect(() => {
     const savedModel = localStorage.getItem('fit_twin_model_preference');
@@ -38,22 +46,26 @@ const App: React.FC = () => {
   }, []);
 
   const handleModelChange = (model: string) => {
+    logger.info("Model changed", { old: activeModel, new: model });
     setActiveModel(model);
     localStorage.setItem('fit_twin_model_preference', model);
   };
 
   const handleStatsSubmit = (data: UserStats) => {
+    logger.info("Stats submitted", data);
     setStats(data);
     setStep(AppStep.CameraFront);
   };
 
   const handleFrontCapture = (image: string, meta: CaptureMetadata) => {
+    logger.info("Front image captured", meta);
     setFrontImage(image);
     setFrontMeta(meta);
     setStep(AppStep.CameraSide);
   };
 
   const handleSideCapture = async (image: string, meta: CaptureMetadata) => {
+    logger.info("Side image captured", meta);
     setSideImage(image);
     setSideMeta(meta);
     setStep(AppStep.Processing);
@@ -62,7 +74,7 @@ const App: React.FC = () => {
     try {
       if (stats && frontImage && frontMeta) {
         
-        console.log(`Starting Analysis. Dual Run Mode: ${dualRunMode}`);
+        logger.info(`Starting Analysis. Model: ${activeModel}, DualRun: ${dualRunMode}`);
 
         if (dualRunMode) {
           // --- DUAL RUN LOGIC ---
@@ -102,7 +114,7 @@ const App: React.FC = () => {
                { front: frontImage, side: image }, 
                { front: frontMeta, side: meta }, 
                { objBlob: null, usdzBlob: null }
-             ).then(() => console.log("Shadow run saved to DB")).catch(e => console.warn("Shadow run save failed", e));
+             ).then(() => logger.info("Shadow run saved")).catch(e => logger.warn("Shadow run save failed", e));
           }
 
         } else {
@@ -111,11 +123,13 @@ const App: React.FC = () => {
           setResults(analysis);
         }
 
+        logger.info("Analysis success");
         setStep(AppStep.Results);
       } else {
         throw new Error("Missing front image or stats");
       }
-    } catch (error) {
+    } catch (error: any) {
+      logger.error("Analysis failed", { message: error.message });
       console.error(error);
       alert("Failed to analyze images. Please try again.");
       setStep(AppStep.CameraFront); // Restart capture process
@@ -127,6 +141,7 @@ const App: React.FC = () => {
   };
 
   const handleReset = () => {
+    logger.info("Resetting application");
     setStep(AppStep.Intro);
     setStats(null);
     setFrontImage(null);

@@ -1,7 +1,7 @@
-
 import React, { useRef, useState, useCallback, useEffect } from 'react';
 import { ArrowLeft, Camera, Volume2, VolumeX, Upload, Image as ImageIcon, X, Check, Info, AlertTriangle, SwitchCamera, Timer } from 'lucide-react';
 import { CaptureMetadata } from '../types';
+import { logger } from '../services/logger';
 
 interface Props {
   onCapture: (imageBase64: string, metadata: CaptureMetadata) => void;
@@ -48,6 +48,8 @@ export const CameraCapture: React.FC<Props> = ({ onCapture, onBack, mode }) => {
   // Mount tracking
   useEffect(() => {
     isMountedRef.current = true;
+    logger.info(`Camera component mounted for ${mode} view`, { captureMethod, facingMode });
+    
     // Initialize Audio Context on mount (requires interaction to unlock usually, but good to prep)
     const AudioContext = window.AudioContext || (window as any).webkitAudioContext;
     audioContextRef.current = new AudioContext();
@@ -58,8 +60,9 @@ export const CameraCapture: React.FC<Props> = ({ onCapture, onBack, mode }) => {
       if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
         audioContextRef.current.close();
       }
+      logger.info(`Camera component unmounted`);
     };
-  }, []);
+  }, [mode]);
 
   // Reset sequence state when mode changes
   useEffect(() => {
@@ -164,6 +167,8 @@ export const CameraCapture: React.FC<Props> = ({ onCapture, onBack, mode }) => {
   const startCamera = useCallback(async () => {
     if (captureMethod !== 'camera') return;
 
+    logger.info("Initializing camera", { facingMode });
+
     // Clean up previous stream
     if (streamRef.current) {
       const tracks = streamRef.current.getTracks();
@@ -192,8 +197,17 @@ export const CameraCapture: React.FC<Props> = ({ onCapture, onBack, mode }) => {
 
       // Try advanced focus
       const videoTrack = mediaStream.getVideoTracks()[0];
+      const capabilities = videoTrack.getCapabilities ? videoTrack.getCapabilities() : {};
+      const settings = videoTrack.getSettings ? videoTrack.getSettings() : {};
+
+      logger.info("Camera started successfully", { 
+        label: videoTrack.label, 
+        width: settings.width, 
+        height: settings.height,
+        capabilities 
+      });
+
       if (typeof videoTrack.getCapabilities === 'function') {
-        const capabilities = videoTrack.getCapabilities();
         // @ts-ignore
         if (capabilities.focusMode && Array.isArray(capabilities.focusMode) && capabilities.focusMode.includes('continuous')) {
           try {
@@ -209,7 +223,8 @@ export const CameraCapture: React.FC<Props> = ({ onCapture, onBack, mode }) => {
         videoRef.current.srcObject = mediaStream;
       }
       setError(null);
-    } catch (err) {
+    } catch (err: any) {
+      logger.error("Camera access failed", { error: err.message, name: err.name });
       if (isMountedRef.current) {
         setError("Unable to access camera. Please try the Upload option.");
       }
@@ -235,6 +250,7 @@ export const CameraCapture: React.FC<Props> = ({ onCapture, onBack, mode }) => {
   };
 
   const toggleCamera = () => {
+    logger.info("Toggling camera facing mode");
     setFacingMode(prev => prev === 'environment' ? 'user' : 'environment');
     setCountdown(null);
     window.speechSynthesis.cancel();
@@ -243,6 +259,8 @@ export const CameraCapture: React.FC<Props> = ({ onCapture, onBack, mode }) => {
 
   const takePhoto = useCallback(() => {
     if (videoRef.current && canvasRef.current && isMountedRef.current) {
+      logger.info("Taking photo");
+
       // 1. Audio Feedback
       playShutterSound();
       
@@ -283,6 +301,8 @@ export const CameraCapture: React.FC<Props> = ({ onCapture, onBack, mode }) => {
           timestamp: new Date().toISOString(),
           screenResolution: `${window.screen.width}x${window.screen.height}`,
         };
+        
+        logger.info("Photo captured and processed", { resolution: `${canvas.width}x${canvas.height}` });
 
         // Small delay to allow flash to render before moving on
         setTimeout(() => {
@@ -295,6 +315,7 @@ export const CameraCapture: React.FC<Props> = ({ onCapture, onBack, mode }) => {
   const startCaptureSequence = useCallback(async () => {
     if (sequenceStartedRef.current) return;
     sequenceStartedRef.current = true;
+    logger.info("Starting capture sequence", { duration: 10 });
     resumeAudioContext(); // Ensure audio is unlocked
 
     // --- PHASE 1: PREPARATION ---
@@ -353,6 +374,7 @@ export const CameraCapture: React.FC<Props> = ({ onCapture, onBack, mode }) => {
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
+      logger.info("File uploaded by user", { size: file.size, type: file.type });
       const reader = new FileReader();
       reader.onloadend = () => {
         setUploadedImage(reader.result as string);
@@ -363,6 +385,7 @@ export const CameraCapture: React.FC<Props> = ({ onCapture, onBack, mode }) => {
 
   const confirmUpload = () => {
     if (uploadedImage) {
+       logger.info("User confirmed uploaded image");
        const metadata: CaptureMetadata = {
           method: 'upload',
           facingMode: 'unknown',

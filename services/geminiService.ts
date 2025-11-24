@@ -1,9 +1,36 @@
-
 import { GoogleGenAI, Type, Schema } from "@google/genai";
 import { UserStats, MeasurementResult } from "../types";
 
 // Initialize Gemini Client
 const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+
+export const analyzeApplicationLogs = async (logs: any[]): Promise<string> => {
+  const prompt = `
+    You are a Senior Mobile QA Engineer and DevOps Specialist.
+    Analyze the following JSON application logs from a React PWA used for camera-based body scanning.
+    
+    The user is reporting issues. Look for:
+    1. Camera permission denials or hardware access failures.
+    2. WebGL context losses.
+    3. Network timeouts or API errors.
+    4. Abnormal user flow (e.g., getting stuck on a step).
+    
+    Logs:
+    ${JSON.stringify(logs, null, 2)}
+    
+    Provide a concise, technical summary of what went wrong and a recommended fix.
+  `;
+
+  try {
+    const response = await ai.models.generateContent({
+      model: 'gemini-3-pro-preview',
+      contents: { text: prompt }
+    });
+    return response.text || "No analysis generated.";
+  } catch (e: any) {
+    return `Analysis failed: ${e.message}`;
+  }
+};
 
 export const analyzeBodyMeasurements = async (
   frontImageBase64: string,

@@ -109,7 +109,15 @@ export const saveScanResult = async (
   try {
     const user = await getUser();
     const userId = user ? user.id : 'anon';
-    const scanId = crypto.randomUUID(); // Client-side generated ID for relation linking
+    
+    // Safer UUID generation for non-secure contexts (http)
+    const scanId = typeof crypto.randomUUID === 'function' 
+      ? crypto.randomUUID() 
+      : 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+          var r = Math.random() * 16 | 0, v = c == 'x' ? r : (r & 0x3 | 0x8);
+          return v.toString(16);
+        });
+
     const timestamp = Date.now();
 
     // 1. Upload Files (Non-blocking: if these fail, we still try to save the record)
@@ -197,7 +205,7 @@ export const saveScanResult = async (
       const backupPayload = {
         id: scanId,
         user_id: user ? user.id : null,
-        full_json: results,
+        full_json: results, // Use full_json to save everything without schema constraints
         // We include basic fields that nearly always exist
         height: stats.height,
         gender: stats.gender || 'Not Specified'
@@ -216,6 +224,7 @@ export const saveScanResult = async (
           console.log("Fallback save successful.");
         }
       } catch (fallbackErr) {
+         console.error("Critical: Fallback save also failed. Ensure 'full_json' column exists.", fallbackErr);
          measurementError = fallbackErr;
       }
     }
