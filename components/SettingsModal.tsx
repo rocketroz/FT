@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { X, Save, Database, CheckCircle, AlertCircle, Shield, Cpu, Activity, Code, Copy, ExternalLink, CloudLightning } from 'lucide-react';
-import { configureSupabase, isSupabaseConnected } from '../services/supabaseService';
+import { configureSupabase, isSupabaseConnected, getSupabaseConfig } from '../services/supabaseService';
 
 interface Props {
   isOpen: boolean;
@@ -27,19 +27,32 @@ export const SettingsModal: React.FC<Props> = ({ isOpen, onClose, onNavigateToAd
       const isConnected = isSupabaseConnected();
       setConnected(isConnected);
       
+      // 1. Try to load from Local Storage (persisted)
       let stored = null;
       try {
         stored = localStorage.getItem('fit_twin_supabase_config');
-      } catch (e) { console.warn("Incognito: LocalStorage read failed"); }
+      } catch (e) { /* Ignore Incognito blocks */ }
 
       if (stored) {
         const config = JSON.parse(stored);
         setUrl(config.url || '');
         setKey(config.key || '');
         setUsingEnvVars(false);
-      } else if (isConnected) {
-        // Connected but no local storage means Env Vars
-        setUsingEnvVars(true);
+      } else {
+        // 2. If not stored, check if we found Env Vars (even if connection failed, it helps to show what we found)
+        const envConfig = getSupabaseConfig();
+        
+        if (isConnected && !stored) {
+          // Connected + No Storage = Connected via Env Vars
+          setUsingEnvVars(true);
+          setUrl(envConfig.url || ''); // Pre-fill for visibility
+          setKey(envConfig.key ? '••••••••' : ''); 
+        } else if (!isConnected) {
+          // Not connected? Pre-fill with partial env vars to help debug why it failed
+          if (envConfig.url) setUrl(envConfig.url);
+          if (envConfig.key) setKey(envConfig.key);
+          setUsingEnvVars(false);
+        }
       }
       
       setSelectedModel(currentModel);
@@ -50,7 +63,7 @@ export const SettingsModal: React.FC<Props> = ({ isOpen, onClose, onNavigateToAd
     e.preventDefault();
     const success = configureSupabase(url, key);
     setConnected(success);
-    setUsingEnvVars(false); // If they manually save, they override env vars logic in UI state context conceptually
+    setUsingEnvVars(false); // Manual override implies strictly not using auto-env vars
     
     // Commit model change
     onModelChange(selectedModel);
@@ -212,167 +225,3 @@ create policy "Public Select Scans" on storage.objects for select using ( bucket
               <h4 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3 flex items-center gap-2">
                 <Activity size={14} /> AI Model Strategy
               </h4>
-              
-              <div className="grid grid-cols-1 gap-3">
-                 <label className={`
-                    relative flex items-center p-4 border rounded-xl cursor-pointer transition-all
-                    ${selectedModel === 'gemini-3-pro-preview' ? 'border-blue-500 bg-blue-50 ring-1 ring-blue-500' : 'border-slate-200 hover:border-slate-300'}
-                 `}>
-                    <input 
-                      type="radio" 
-                      name="model" 
-                      value="gemini-3-pro-preview" 
-                      checked={selectedModel === 'gemini-3-pro-preview'}
-                      onChange={(e) => setSelectedModel(e.target.value)}
-                      className="absolute opacity-0"
-                    />
-                    <div className="flex-1">
-                      <div className="flex justify-between items-center">
-                        <span className="font-bold text-slate-900">Gemini 3.0 Pro</span>
-                        <span className="text-[10px] bg-green-100 text-green-700 px-2 py-0.5 rounded-full font-bold">DEFAULT</span>
-                      </div>
-                      <p className="text-xs text-slate-500 mt-1">Native multimodal reasoning. Best for complex visual analysis.</p>
-                    </div>
-                    {selectedModel === 'gemini-3-pro-preview' && <CheckCircle size={18} className="text-blue-600 ml-3" />}
-                 </label>
-
-                 <label className={`
-                    relative flex items-center p-4 border rounded-xl cursor-pointer transition-all
-                    ${selectedModel === 'gemini-2.5-flash' ? 'border-amber-500 bg-amber-50 ring-1 ring-amber-500' : 'border-slate-200 hover:border-slate-300'}
-                 `}>
-                    <input 
-                      type="radio" 
-                      name="model" 
-                      value="gemini-2.5-flash" 
-                      checked={selectedModel === 'gemini-2.5-flash'}
-                      onChange={(e) => setSelectedModel(e.target.value)}
-                      className="absolute opacity-0"
-                    />
-                    <div className="flex-1">
-                      <div className="flex justify-between items-center">
-                        <span className="font-bold text-slate-900">Gemini 2.5 Flash</span>
-                        <span className="text-[10px] bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full font-bold">THINKING MODE</span>
-                      </div>
-                      <p className="text-xs text-slate-500 mt-1">Uses "Thinking Config" (12k budget) for deep logical chains.</p>
-                    </div>
-                     {selectedModel === 'gemini-2.5-flash' && <CheckCircle size={18} className="text-amber-600 ml-3" />}
-                 </label>
-              </div>
-            </div>
-
-            <hr className="border-slate-100" />
-
-            {/* Database Section */}
-            <div>
-              <h4 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3 flex items-center gap-2">
-                 <Database size={14} /> Cloud Database
-              </h4>
-              
-              <div className={`p-3 rounded-lg flex items-start gap-3 text-sm mb-4 ${connected ? 'bg-green-50 text-green-800' : 'bg-slate-50 text-slate-600'}`}>
-                {connected ? <CheckCircle size={18} className="mt-0.5 shrink-0" /> : <AlertCircle size={18} className="mt-0.5 shrink-0" />}
-                <div>
-                  <span className="font-bold block flex items-center gap-2">
-                    {connected ? 'Connected to Supabase' : 'Not Connected'}
-                    {usingEnvVars && <span className="text-[9px] bg-green-200 text-green-800 px-1.5 py-0.5 rounded flex items-center gap-1"><CloudLightning size={10}/> ENV</span>}
-                  </span>
-                  <p className="text-xs opacity-80 mt-1">
-                    {usingEnvVars 
-                      ? 'Using configuration from Environment Variables (Vercel).'
-                      : connected 
-                        ? 'Cloud saving enabled via custom settings.' 
-                        : 'Enter details to enable cloud saving.'}
-                  </p>
-                </div>
-              </div>
-
-              {!usingEnvVars && (
-                <div className="space-y-3">
-                  <div>
-                    <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Project URL</label>
-                    <input 
-                      type="text" 
-                      value={url}
-                      onChange={(e) => setUrl(e.target.value)}
-                      placeholder="https://xyz.supabase.co"
-                      className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-xs font-mono text-slate-700"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Anon Key</label>
-                    <input 
-                      type="password" 
-                      value={key}
-                      onChange={(e) => setKey(e.target.value)}
-                      placeholder="eyJh..."
-                      className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-xs font-mono text-slate-700"
-                    />
-                  </div>
-                </div>
-              )}
-            </div>
-
-            {/* Schema Helper */}
-            <div className="border border-slate-200 rounded-xl overflow-hidden">
-               <button 
-                 type="button" 
-                 onClick={() => setShowSchema(!showSchema)}
-                 className="w-full bg-slate-50 p-3 text-xs font-bold text-slate-600 flex justify-between items-center hover:bg-slate-100 transition-colors"
-               >
-                 <span className="flex items-center gap-2"><Code size={14}/> Database Setup Instructions</span>
-                 <span>{showSchema ? 'Hide' : 'Show'}</span>
-               </button>
-               
-               {showSchema && (
-                 <div className="p-4 bg-slate-900 relative group">
-                    <div className="text-slate-300 text-xs mb-3 space-y-2">
-                      <p><strong className="text-white">Step 1:</strong> Copy the SQL script below.</p>
-                      <p><strong className="text-white">Step 2:</strong> Go to the <a href="https://supabase.com/dashboard/project/_/sql" target="_blank" rel="noreferrer" className="text-blue-400 hover:text-blue-300 hover:underline inline-flex items-center gap-1">Supabase SQL Editor <ExternalLink size={10}/></a>.</p>
-                      <p><strong className="text-white">Step 3:</strong> Paste the script and click <strong>"Run"</strong> to create your tables.</p>
-                    </div>
-                    
-                    <div className="relative">
-                      <button 
-                        type="button"
-                        onClick={() => copyToClipboard(schemaSQL)}
-                        className={`absolute top-2 right-2 p-1.5 rounded transition-all z-10 flex items-center gap-1 ${
-                          copied ? 'bg-green-500/20 text-green-300' : 'bg-white/10 hover:bg-white/20 text-white'
-                        }`}
-                        title="Copy SQL"
-                      >
-                        {copied ? <CheckCircle size={12} /> : <Copy size={12} />}
-                        <span className="text-[10px] font-bold">{copied ? 'Copied!' : 'Copy SQL'}</span>
-                      </button>
-                      <pre className="text-[10px] text-slate-400 font-mono overflow-x-auto whitespace-pre-wrap p-3 pt-8 bg-black/30 rounded border border-white/10 max-h-60">
-                        {schemaSQL}
-                      </pre>
-                    </div>
-                 </div>
-               )}
-            </div>
-
-            <div className="pt-2 space-y-3">
-              <button 
-                type="submit"
-                className={`w-full py-3 rounded-xl font-bold flex items-center justify-center gap-2 transition-all ${saved ? 'bg-green-600 text-white' : 'bg-slate-900 text-white hover:bg-slate-800'}`}
-              >
-                {saved ? <CheckCircle size={18} /> : <Save size={18} />}
-                {saved ? 'Changes Saved' : 'Save Configuration'}
-              </button>
-              
-              {connected && onNavigateToAdmin && (
-                <button
-                  type="button"
-                  onClick={() => { onClose(); onNavigateToAdmin(); }}
-                  className="w-full py-3 rounded-xl font-bold flex items-center justify-center gap-2 transition-all bg-slate-100 text-slate-700 hover:bg-slate-200"
-                >
-                  <Shield size={18} /> Open Admin Dashboard
-                </button>
-              )}
-            </div>
-          </form>
-        </div>
-      </div>
-    </div>
-  );
-};

@@ -1,8 +1,33 @@
 import { GoogleGenAI, Type, Schema } from "@google/genai";
 import { UserStats, MeasurementResult } from "../types";
 
-// Initialize Gemini Client
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+// Helper to get API Key safely
+const getApiKey = () => {
+  // Check process.env (Node/Webpack) and import.meta.env (Vite)
+  if (typeof process !== 'undefined' && process.env?.API_KEY) {
+    return process.env.API_KEY;
+  }
+  // @ts-ignore
+  if (typeof import.meta !== 'undefined' && import.meta.env) {
+    // @ts-ignore
+    return import.meta.env.API_KEY || import.meta.env.VITE_API_KEY;
+  }
+  return undefined;
+};
+
+// Lazy initialization of Gemini Client
+let aiInstance: GoogleGenAI | null = null;
+const getAI = () => {
+  if (!aiInstance) {
+    const apiKey = getApiKey();
+    if (!apiKey) {
+      console.error("Gemini API Key is missing. Check your environment variables (API_KEY or VITE_API_KEY).");
+      // Fallback or let it throw naturally from SDK if desired, but explicit error is better
+    }
+    aiInstance = new GoogleGenAI({ apiKey: apiKey || '' });
+  }
+  return aiInstance;
+};
 
 export const analyzeApplicationLogs = async (logs: any[]): Promise<string> => {
   const prompt = `
@@ -22,9 +47,10 @@ export const analyzeApplicationLogs = async (logs: any[]): Promise<string> => {
   `;
 
   try {
+    const ai = getAI();
     const response = await ai.models.generateContent({
       model: 'gemini-3-pro-preview',
-      contents: prompt // Fixed: Pass prompt string directly or use strict Content array format
+      contents: prompt
     });
     return response.text || "No analysis generated.";
   } catch (e: any) {
@@ -232,6 +258,7 @@ export const analyzeBodyMeasurements = async (
       console.log("Using Thinking Budget: 12000 for model:", modelId);
     }
 
+    const ai = getAI();
     const response = await ai.models.generateContent({
       model: modelId,
       contents: {

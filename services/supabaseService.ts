@@ -6,29 +6,43 @@ const STORAGE_KEY = 'fit_twin_supabase_config';
 
 export let supabase: SupabaseClient | null = null;
 
+// Helper to check if localStorage is writable (detects Incognito/Private mode restrictions)
+const isStorageAvailable = () => {
+  try {
+    const testKey = '__test_storage__';
+    localStorage.setItem(testKey, testKey);
+    localStorage.removeItem(testKey);
+    return true;
+  } catch (e) {
+    return false;
+  }
+};
+
 // Helper to safely access env vars across different build tools (Vite, CRA, Next.js)
-// NOTE: We must check specific keys statically for bundlers (Webpack/Vite) to replace them correctly.
-// Dynamic access like process.env['VITE_' + key] often fails during build optimization.
-const getSupabaseConfig = () => {
+// We export this so the Settings UI can check what was found
+export const getSupabaseConfig = () => {
   let url = '';
   let key = '';
 
-  // 1. Try Vite (import.meta.env)
-  // @ts-ignore
-  if (typeof import.meta !== 'undefined' && import.meta.env) {
+  try {
+    // 1. Try Vite (import.meta.env) - Explicit checks for bundler replacement
     // @ts-ignore
-    url = import.meta.env.VITE_SUPABASE_URL || import.meta.env.SUPABASE_URL || import.meta.env.REACT_APP_SUPABASE_URL;
-    // @ts-ignore
-    key = import.meta.env.VITE_SUPABASE_ANON_KEY || import.meta.env.SUPABASE_ANON_KEY || import.meta.env.REACT_APP_SUPABASE_ANON_KEY;
-  }
-
-  // 2. Try Node/CRA (process.env)
-  // Check if we found them yet, otherwise check process.env
-  if (!url || !key) {
-    if (typeof process !== 'undefined' && process.env) {
-      url = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || process.env.REACT_APP_SUPABASE_URL || '';
-      key = process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY || process.env.REACT_APP_SUPABASE_ANON_KEY || '';
+    if (typeof import.meta !== 'undefined' && import.meta.env) {
+      // @ts-ignore
+      url = import.meta.env.VITE_SUPABASE_URL || import.meta.env.SUPABASE_URL || import.meta.env.REACT_APP_SUPABASE_URL;
+      // @ts-ignore
+      key = import.meta.env.VITE_SUPABASE_ANON_KEY || import.meta.env.SUPABASE_ANON_KEY || import.meta.env.REACT_APP_SUPABASE_ANON_KEY;
     }
+  } catch (e) { /* Ignore access errors */ }
+
+  // 2. Try Node/CRA (process.env) - Fallback
+  if (!url || !key) {
+    try {
+      if (typeof process !== 'undefined' && process.env) {
+        url = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || process.env.REACT_APP_SUPABASE_URL || '';
+        key = process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY || process.env.REACT_APP_SUPABASE_ANON_KEY || '';
+      }
+    } catch (e) { /* Ignore process access errors */ }
   }
 
   return { url, key };
@@ -37,29 +51,42 @@ const getSupabaseConfig = () => {
 // Initialize Supabase Logic
 export const initSupabase = (): boolean => {
   try {
+    // Determine client options based on storage availability
+    const options = isStorageAvailable() 
+      ? {} // Default: Use localStorage
+      : { 
+          auth: { 
+            persistSession: false, // Disable persistence in Incognito to avoid SecurityError
+            autoRefreshToken: false,
+            detectSessionInUrl: false
+          } 
+        };
+
     // Check Environment Variables First (Vercel/Deployment)
     const { url: envUrl, key: envKey } = getSupabaseConfig();
 
     if (envUrl && envKey) {
-      supabase = createClient(envUrl, envKey);
-      // logger.info("Supabase connected via Environment Variables");
+      // console.log("Initializing Supabase from Environment Variables");
+      supabase = createClient(envUrl, envKey, options);
       return true;
     }
 
     // Fallback to Local Storage (Manual Settings)
-    // Wrap in try-catch specifically for SecurityError in Incognito/Private modes
-    try {
-      const stored = localStorage.getItem(STORAGE_KEY);
-      if (stored) {
-        const { url, key } = JSON.parse(stored);
-        if (url && key) {
-          supabase = createClient(url, key);
-          // logger.info("Supabase connected via Local Settings");
-          return true;
+    // Only attempt if storage is available
+    if (isStorageAvailable()) {
+      try {
+        const stored = localStorage.getItem(STORAGE_KEY);
+        if (stored) {
+          const { url, key } = JSON.parse(stored);
+          if (url && key) {
+            // console.log("Initializing Supabase from LocalStorage");
+            supabase = createClient(url, key, options);
+            return true;
+          }
         }
+      } catch (storageError) {
+        console.warn("LocalStorage read failed during init:", storageError);
       }
-    } catch (storageError) {
-      console.warn("LocalStorage access failed (likely Incognito/Private mode):", storageError);
     }
 
   } catch (e) {
@@ -70,12 +97,29 @@ export const initSupabase = (): boolean => {
 };
 
 export const configureSupabase = (url: string, key: string) => {
+  // Always try to init the client in memory
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({ url, key }));
+    const options = isStorageAvailable() 
+      ? {} 
+      : { auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false } };
+      
+    supabase = createClient(url, key, options);
+    
+    // Only persist if we can
+    if (isStorageAvailable()) {
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify({ url, key }));
+      } catch (e) {
+        console.warn("Could not save config to localStorage", e);
+      }
+    } else {
+      console.warn("Storage unavailable - configuration will be temporary for this session.");
+    }
+    return true;
   } catch (e) {
-    console.warn("Could not save config to localStorage (Incognito?)", e);
+    console.error("Failed to configure Supabase:", e);
+    return false;
   }
-  return initSupabase();
 };
 
 export const isSupabaseConnected = (): boolean => {
@@ -138,6 +182,7 @@ export const saveScanResult = async (
   metadata: { front: CaptureMetadata, side: CaptureMetadata },
   models: { objBlob: Blob | null, usdzBlob: Blob | null }
 ) => {
+  // Ensure we are initialized
   if (!supabase) {
     initSupabase();
   }
