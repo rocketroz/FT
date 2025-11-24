@@ -1,4 +1,3 @@
-
 import { createClient, SupabaseClient, User, Session } from '@supabase/supabase-js';
 import { UserStats, MeasurementResult, CaptureMetadata } from '../types';
 import { logger } from './logger';
@@ -61,13 +60,15 @@ export const getSupabaseConfig = () => {
 export const initSupabase = (): boolean => {
   try {
     // Determine client options based on storage availability
+    // CRITICAL: detectSessionInUrl MUST be true for OAuth redirects to work, 
+    // even if storage is disabled (session will be in-memory).
     const options = isStorageAvailable() 
-      ? {} // Default: Use localStorage
+      ? {} // Default: Use localStorage, detectSessionInUrl: true is default
       : { 
           auth: { 
             persistSession: false, // Disable persistence in Incognito to avoid SecurityError
             autoRefreshToken: false,
-            detectSessionInUrl: false
+            detectSessionInUrl: true // Enable parsing hash for OAuth
           } 
         };
 
@@ -112,7 +113,7 @@ export const configureSupabase = (url: string, key: string) => {
   try {
     const options = isStorageAvailable() 
       ? {} 
-      : { auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false } };
+      : { auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: true } };
       
     supabase = createClient(url, key, options);
     console.log("[Supabase] Client configured manually");
@@ -140,20 +141,30 @@ export const isSupabaseConnected = (): boolean => {
 
 // --- AUTH SERVICES ---
 export const signUp = async (email: string, password: string) => {
+  if (!supabase) initSupabase(); // Lazy attempt
   if (!supabase) return { user: null, session: null, error: { message: "Supabase not connected" } };
   const { data, error } = await supabase.auth.signUp({ email, password });
   return { user: data.user, session: data.session, error };
 };
 
 export const signIn = async (email: string, password: string) => {
+  if (!supabase) initSupabase(); // Lazy attempt
   if (!supabase) return { user: null, session: null, error: { message: "Supabase not connected" } };
   const { data, error } = await supabase.auth.signInWithPassword({ email, password });
   return { user: data.user, session: data.session, error };
 };
 
 export const signInWithGoogle = async () => {
-    if (!supabase) return;
-    await supabase.auth.signInWithOAuth({ provider: 'google' });
+    if (!supabase) initSupabase(); // Lazy attempt
+    if (!supabase) return { error: { message: "Supabase not connected. Check Settings." } };
+    
+    const { error } = await supabase.auth.signInWithOAuth({ 
+      provider: 'google', 
+      options: {
+        redirectTo: window.location.origin
+      }
+    });
+    return { error };
 };
 
 export const getUser = async (): Promise<User | null> => {
@@ -186,6 +197,16 @@ const uploadFile = async (bucket: string, path: string, file: Blob): Promise<str
 
 // Initialize on load
 initSupabase();
+
+export const getScans = async (limit = 50) => {
+  if (!supabase) return [];
+  const { data } = await supabase
+    .from('measurements')
+    .select('*')
+    .order('created_at', { ascending: false })
+    .limit(limit);
+  return data || [];
+};
 
 export const saveScanResult = async (
   stats: UserStats, 
@@ -314,22 +335,20 @@ export const saveScanResult = async (
 
     if (measurementError) {
        console.error("[Supabase] Insert Attempt 1 failed:", measurementError);
-    }
-
-    // ATTEMPT 2: Fallback to Minimal Schema (if Full failed due to column mismatch)
-    if (measurementError) {
-      console.warn("[Supabase] Attempting minimal fallback save (checking for schema mismatch).");
+       
+       // ATTEMPT 2: Fallback to Minimal Schema (if Full failed due to column mismatch)
+       console.warn("[Supabase] Attempting minimal fallback save (checking for schema mismatch).");
       
-      const backupPayload = {
+       const backupPayload = {
         id: scanId,
         user_id: user ? user.id : null,
         full_json: results, // Use full_json to save everything without schema constraints
         height: stats.height,
         gender: stats.gender || 'Not Specified',
         session_id: logger.getSessionId()
-      };
+       };
 
-      try {
+       try {
         const { data, error } = await supabase
           .from('measurements')
           .insert([backupPayload])
@@ -341,10 +360,10 @@ export const saveScanResult = async (
         if (!error) {
           console.log("[Supabase] Fallback save successful.");
         }
-      } catch (fallbackErr) {
+       } catch (fallbackErr) {
          console.error("[Supabase] Critical: Fallback save also failed.", fallbackErr);
          measurementError = fallbackErr;
-      }
+       }
     }
 
     if (measurementError) {
@@ -354,64 +373,23 @@ export const saveScanResult = async (
 
     console.log("[Supabase] Measurement record saved successfully.");
 
-    // 3. Insert Related Data (Auxiliary tables)
-    // We wrap these in try-catch so they don't block the main success if they fail
-    try {
-      const promises = [];
-
-      // Table: measurement_images
-      if (frontUrl) promises.push(supabase.from('measurement_images').insert({ measurement_id: scanId, view_type: 'front', public_url: frontUrl, storage_path: `${userId}/${scanId}/front.jpg` }));
-      if (sideUrl) promises.push(supabase.from('measurement_images').insert({ measurement_id: scanId, view_type: 'side', public_url: sideUrl, storage_path: `${userId}/${scanId}/side.jpg` }));
-
-      // Table: measurement_calculations (Transparency Log)
-      if (results.technical_analysis) {
-        // Scaling
-        promises.push(supabase.from('measurement_calculations').insert({
-          measurement_id: scanId,
-          metric_name: 'global_scaling',
-          raw_pixels: results.technical_analysis.scaling.pixel_height?.toString() || '',
-          scaling_factor: results.technical_analysis.scaling.cm_per_pixel,
-          formula: `height_cm / height_px (${stats.height} / ${results.technical_analysis.scaling.pixel_height})`
-        }));
-
-        // Key areas formulas
-        Object.entries(results.technical_analysis.formulas || {}).forEach(([part, formula]) => {
-          const raw = results.technical_analysis?.raw_measurements[part];
-          promises.push(supabase.from('measurement_calculations').insert({
-            measurement_id: scanId,
-            metric_name: part,
-            raw_pixels: raw ? JSON.stringify(raw) : null,
-            formula: formula,
-            scaling_factor: results.technical_analysis?.scaling.cm_per_pixel
-          }));
-        });
-      }
-
-      await Promise.allSettled(promises);
-      console.log("[Supabase] Auxiliary data saved.");
-    } catch (auxErr) {
-      console.warn("[Supabase] Failed to save auxiliary data (images/calculations), but main record was saved.", auxErr);
+    // 3. Insert Related Data (Images)
+    if (measurementData) {
+        const imagePayloads = [];
+        if (frontUrl) imagePayloads.push({ measurement_id: scanId, view_type: 'front', public_url: frontUrl, storage_path: `scans/${userId}/${scanId}/front_${timestamp}.jpg` });
+        if (sideUrl) imagePayloads.push({ measurement_id: scanId, view_type: 'side', public_url: sideUrl, storage_path: `scans/${userId}/${scanId}/side_${timestamp}.jpg` });
+        if (objUrl) imagePayloads.push({ measurement_id: scanId, view_type: 'model_obj', public_url: objUrl, storage_path: `scans/${userId}/${scanId}/model_${timestamp}.obj` });
+        
+        if (imagePayloads.length > 0) {
+            const { error: imgError } = await supabase.from('measurement_images').insert(imagePayloads);
+            if (imgError) console.warn("[Supabase] Failed to link images to measurement:", imgError);
+        }
     }
 
     return { success: true, data: measurementData, error: null };
-  } catch (err) {
-    console.error('[Supabase] Fatal error during save operation:', err);
+
+  } catch (err: any) {
+    console.error("[Supabase] Unexpected error during save:", err);
     return { success: false, data: null, error: err };
   }
-};
-
-export const getScans = async (limit = 20) => {
-  if (!supabase) return [];
-  
-  const { data, error } = await supabase
-    .from('measurements')
-    .select('*')
-    .order('created_at', { ascending: false })
-    .limit(limit);
-
-  if (error) {
-    console.error("[Supabase] Error fetching scans:", error);
-    return [];
-  }
-  return data;
 };
