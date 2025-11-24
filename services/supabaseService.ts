@@ -6,7 +6,25 @@ const STORAGE_KEY = 'fit_twin_supabase_config';
 
 export let supabase: SupabaseClient | null = null;
 
-// Helper to check if localStorage is writable (detects Incognito/Private mode restrictions)
+// --- Connection Event System ---
+type ConnectionListener = (isConnected: boolean) => void;
+const connectionListeners: ConnectionListener[] = [];
+
+export const onSupabaseConnectionChange = (callback: ConnectionListener) => {
+  connectionListeners.push(callback);
+  // Fire immediately with current state
+  callback(!!supabase);
+  return () => {
+    const index = connectionListeners.indexOf(callback);
+    if (index > -1) connectionListeners.splice(index, 1);
+  };
+};
+
+const notifyListeners = (status: boolean) => {
+  connectionListeners.forEach(l => l(status));
+};
+
+// Helper to check if localStorage is writable
 const isStorageAvailable = () => {
   try {
     const testKey = '__test_storage__';
@@ -18,13 +36,10 @@ const isStorageAvailable = () => {
   }
 };
 
-// Helper to safely access env vars across different build tools (Vite, CRA, Next.js)
-// We export this so the Settings UI can check what was found
 export const getSupabaseConfig = () => {
   let url = '';
   let key = '';
 
-  // 1. Try Vite (import.meta.env) - Explicit checks for bundler replacement
   try {
     // @ts-ignore
     if (typeof import.meta !== 'undefined' && import.meta.env) {
@@ -33,13 +48,11 @@ export const getSupabaseConfig = () => {
       // @ts-ignore
       key = import.meta.env.VITE_SUPABASE_ANON_KEY || import.meta.env.SUPABASE_ANON_KEY || import.meta.env.REACT_APP_SUPABASE_ANON_KEY;
     }
-  } catch (e) { /* Ignore access errors */ }
+  } catch (e) { /* Ignore */ }
 
-  // 2. Try Node/CRA/Next (process.env) - Fallback
   if (!url || !key) {
     try {
       if (typeof process !== 'undefined' && process.env) {
-        // Comprehensive check for common framework prefixes
         url = process.env.VITE_SUPABASE_URL || 
               process.env.NEXT_PUBLIC_SUPABASE_URL || 
               process.env.REACT_APP_SUPABASE_URL || 
@@ -50,66 +63,68 @@ export const getSupabaseConfig = () => {
               process.env.REACT_APP_SUPABASE_ANON_KEY || 
               process.env.SUPABASE_ANON_KEY || '';
       }
-    } catch (e) { /* Ignore process access errors */ }
+    } catch (e) { /* Ignore */ }
   }
 
   return { url, key };
 };
 
-// Initialize Supabase Logic
 export const initSupabase = (): boolean => {
   try {
-    // Determine client options based on storage availability
-    // CRITICAL: detectSessionInUrl MUST be true for OAuth redirects to work, 
-    // even if storage is disabled (session will be in-memory).
     const options = isStorageAvailable() 
-      ? {} // Default: Use localStorage, detectSessionInUrl: true is default
+      ? {} 
       : { 
           auth: { 
-            persistSession: false, // Disable persistence in Incognito to avoid SecurityError
+            persistSession: false, 
             autoRefreshToken: false,
-            detectSessionInUrl: true // Enable parsing hash for OAuth
+            detectSessionInUrl: true 
           } 
         };
 
-    // Check Environment Variables First (Vercel/Deployment)
     const { url: envUrl, key: envKey } = getSupabaseConfig();
 
     if (envUrl && envKey) {
       console.log("[Supabase] Initializing from Environment Variables");
       supabase = createClient(envUrl, envKey, options);
+      notifyListeners(true);
       return true;
     }
 
-    // Fallback to Local Storage (Manual Settings)
-    // Only attempt if storage is available
     if (isStorageAvailable()) {
       try {
         const stored = localStorage.getItem(STORAGE_KEY);
         if (stored) {
           const { url, key } = JSON.parse(stored);
           if (url && key) {
-            console.log("[Supabase] Initializing from LocalStorage configuration");
+            console.log("[Supabase] Initializing from LocalStorage");
             supabase = createClient(url, key, options);
+            notifyListeners(true);
             return true;
           }
         }
       } catch (storageError) {
-        console.warn("[Supabase] LocalStorage read failed during init:", storageError);
+        console.warn("[Supabase] LocalStorage error:", storageError);
       }
     }
     
-    console.warn("[Supabase] No configuration found. Client not initialized.");
+    // Even if no config found, checking returning false is enough
+    if (!supabase) {
+      console.warn("[Supabase] No configuration found.");
+      notifyListeners(false);
+      return false;
+    }
+
+    return true;
 
   } catch (e) {
-    console.error("[Supabase] Error initializing client", e);
+    console.error("[Supabase] Init error", e);
+    notifyListeners(false);
   }
   
   return false;
 };
 
 export const configureSupabase = (url: string, key: string) => {
-  // Always try to init the client in memory
   try {
     const options = isStorageAvailable() 
       ? {} 
@@ -118,19 +133,19 @@ export const configureSupabase = (url: string, key: string) => {
     supabase = createClient(url, key, options);
     console.log("[Supabase] Client configured manually");
     
-    // Only persist if we can
     if (isStorageAvailable()) {
       try {
         localStorage.setItem(STORAGE_KEY, JSON.stringify({ url, key }));
       } catch (e) {
-        console.warn("[Supabase] Could not save config to localStorage", e);
+        console.warn("[Supabase] Save config failed", e);
       }
-    } else {
-      console.warn("[Supabase] Storage unavailable - configuration will be temporary for this session.");
     }
+    
+    notifyListeners(true);
     return true;
   } catch (e) {
-    console.error("[Supabase] Failed to configure:", e);
+    console.error("[Supabase] Configuration failed:", e);
+    notifyListeners(false);
     return false;
   }
 };
@@ -141,36 +156,35 @@ export const isSupabaseConnected = (): boolean => {
 
 // --- AUTH SERVICES ---
 export const signUp = async (email: string, password: string) => {
-  if (!supabase) initSupabase(); // Lazy attempt
-  if (!supabase) return { user: null, session: null, error: { message: "Supabase not connected" } };
-  const { data, error } = await supabase.auth.signUp({ email, password });
+  if (!supabase && !initSupabase()) return { user: null, session: null, error: { message: "Database not connected" } };
+  
+  const { data, error } = await supabase!.auth.signUp({
+    email,
+    password,
+  });
   return { user: data.user, session: data.session, error };
 };
 
 export const signIn = async (email: string, password: string) => {
-  if (!supabase) initSupabase(); // Lazy attempt
-  if (!supabase) return { user: null, session: null, error: { message: "Supabase not connected" } };
-  const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+  if (!supabase && !initSupabase()) return { user: null, session: null, error: { message: "Database not connected" } };
+
+  const { data, error } = await supabase!.auth.signInWithPassword({
+    email,
+    password,
+  });
   return { user: data.user, session: data.session, error };
 };
 
 export const signInWithGoogle = async () => {
-    if (!supabase) initSupabase(); // Lazy attempt
-    if (!supabase) return { error: { message: "Supabase not connected. Check Settings." } };
-    
-    const { error } = await supabase.auth.signInWithOAuth({ 
-      provider: 'google', 
-      options: {
-        redirectTo: window.location.origin
-      }
-    });
-    return { error };
-};
+  if (!supabase && !initSupabase()) return { error: { message: "Database not connected" } };
 
-export const getUser = async (): Promise<User | null> => {
-  if (!supabase) return null;
-  const { data } = await supabase.auth.getUser();
-  return data.user;
+  const { data, error } = await supabase!.auth.signInWithOAuth({
+    provider: 'google',
+    options: {
+      redirectTo: window.location.origin,
+    },
+  });
+  return { data, error };
 };
 
 export const signOut = async () => {
@@ -178,218 +192,144 @@ export const signOut = async () => {
   await supabase.auth.signOut();
 };
 
-// --- STORAGE HELPERS ---
-const base64ToBlob = async (base64: string): Promise<Blob> => {
-  const response = await fetch(base64);
-  return await response.blob();
+export const getUser = async (): Promise<User | null> => {
+  if (!supabase && !initSupabase()) return null;
+  const { data } = await supabase!.auth.getUser();
+  return data.user;
 };
 
-const uploadFile = async (bucket: string, path: string, file: Blob): Promise<string | null> => {
-  if (!supabase) return null;
-  const { data, error } = await supabase.storage.from(bucket).upload(path, file, { upsert: true });
-  if (error) {
-    console.warn(`[Supabase] Upload failed for ${path}. Bucket might not exist or policies block upload.`, error.message);
+// --- DATA SERVICES ---
+
+// Helper for image upload
+const uploadImage = async (userId: string, imageBase64: string, type: 'front' | 'side'): Promise<string | null> => {
+  try {
+    if (!supabase) return null;
+    
+    // Convert base64 to blob
+    const base64Data = imageBase64.split(',')[1];
+    const byteCharacters = atob(base64Data);
+    const byteNumbers = new Array(byteCharacters.length);
+    for (let i = 0; i < byteCharacters.length; i++) {
+      byteNumbers[i] = byteCharacters.charCodeAt(i);
+    }
+    const byteArray = new Uint8Array(byteNumbers);
+    const blob = new Blob([byteArray], { type: 'image/jpeg' });
+
+    const fileName = `${userId}/${Date.now()}_${type}.jpg`;
+    
+    const { data, error } = await supabase.storage
+      .from('scans')
+      .upload(fileName, blob, {
+        cacheControl: '3600',
+        upsert: false
+      });
+
+    if (error) {
+      console.error("Upload error:", error);
+      return null;
+    }
+
+    const { data: { publicUrl } } = supabase.storage.from('scans').getPublicUrl(fileName);
+    return publicUrl;
+  } catch (e) {
+    console.error("Upload exception:", e);
     return null;
   }
-  const { data: urlData } = supabase.storage.from(bucket).getPublicUrl(path);
-  return urlData.publicUrl;
-};
-
-// Initialize on load
-initSupabase();
-
-export const getScans = async (limit = 50) => {
-  if (!supabase) return [];
-  const { data } = await supabase
-    .from('measurements')
-    .select('*')
-    .order('created_at', { ascending: false })
-    .limit(limit);
-  return data || [];
 };
 
 export const saveScanResult = async (
   stats: UserStats, 
-  results: MeasurementResult,
+  results: MeasurementResult, 
   images: { front: string, side: string },
-  metadata: { front: CaptureMetadata, side: CaptureMetadata },
+  meta: { front: any, side: any },
   models: { objBlob: Blob | null, usdzBlob: Blob | null }
-): Promise<{ success: boolean; data: any; error: any }> => {
-  
-  // Ensure we are initialized
-  if (!supabase) {
-    initSupabase();
-  }
-
-  if (!supabase) {
-    console.error("[Supabase] Not connected. Cannot save.");
-    return { success: false, data: null, error: { message: "Supabase client not initialized. Check settings." } };
-  }
+) => {
+  if (!supabase && !initSupabase()) return { success: false, error: { message: "Database not connected" } };
 
   try {
-    console.log("[Supabase] Starting save process...");
-    
-    // Check Auth State
     const user = await getUser();
     const userId = user ? user.id : 'anon';
-    console.log(`[Supabase] Current User ID: ${userId}`);
-    
-    // Safer UUID generation for non-secure contexts (http)
-    const scanId = typeof crypto.randomUUID === 'function' 
-      ? crypto.randomUUID() 
-      : 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
-          var r = Math.random() * 16 | 0, v = c == 'x' ? r : (r & 0x3 | 0x8);
-          return v.toString(16);
-        });
+    const sessionId = logger.getSessionId(); // Link to debug logs
 
-    const timestamp = Date.now();
+    // 1. Upload Images
+    const frontUrl = await uploadImage(userId, images.front, 'front');
+    const sideUrl = await uploadImage(userId, images.side, 'side');
 
-    // 1. Upload Files (Non-blocking: if these fail, we still try to save the record)
-    let frontUrl = null;
-    let sideUrl = null;
-    let objUrl = null;
-    let usdzUrl = null;
-
-    try {
-      console.log("[Supabase] Uploading images...");
-      const frontBlob = await base64ToBlob(images.front);
-      const sideBlob = await base64ToBlob(images.side);
-      frontUrl = await uploadFile('scans', `${userId}/${scanId}/front_${timestamp}.jpg`, frontBlob);
-      sideUrl = await uploadFile('scans', `${userId}/${scanId}/side_${timestamp}.jpg`, sideBlob);
-
-      if (models.objBlob) objUrl = await uploadFile('scans', `${userId}/${scanId}/model_${timestamp}.obj`, models.objBlob);
-      if (models.usdzBlob) usdzUrl = await uploadFile('scans', `${userId}/${scanId}/model_${timestamp}.usdz`, models.usdzBlob);
-      console.log("[Supabase] File uploads completed.");
-    } catch (uploadErr) {
-      console.warn("[Supabase] File upload process had issues, proceeding to save record...", uploadErr);
-    }
-
-    // Calculate approximate cost (Simulated)
-    const cost = (results.usage_metadata?.totalTokenCount || 0) * 0.000004;
-
-    // Prepare JSON for landmarks (combining front and side)
-    const landmarksJson = {
-      front: results.landmarks_front || results.landmarks?.front,
-      side: results.landmarks_side || results.landmarks?.side
-    };
-
-    // 2. Insert Main Measurement Record with FALLBACK STRATEGY
-    let measurementData = null;
-    let measurementError = null;
-
-    // ATTEMPT 1: Full Schema Insert
-    try {
-      const fullPayload = {
-        id: scanId,
-        user_id: user ? user.id : null, // Explicitly pass null if no user, to match UUID type expectations
-        session_id: logger.getSessionId(),
-        gender: stats.gender || 'Not Specified',
-        height: stats.height,
-        weight: stats.weight || null,
-        age: stats.age || null,
-        
-        // Measurements
-        chest: results.chest || null,
-        waist: results.waist || null,
-        hips: results.hips || null,
-        shoulder: results.shoulder || null,
-        neck: results.neck || null,
-        sleeve: results.sleeve || null,
-        bicep: results.bicep || null,
-        wrist: results.wrist || null,
-        inseam: results.inseam || null,
-        outseam: results.outseam || null,
-        thigh: results.thigh || null,
-        calf: results.calf || null,
-        ankle: results.ankle || null,
-        torso_length: results.torso_length || null,
-        
-        // Meta
-        confidence: results.confidence,
-        capture_method: metadata.front.method,
-        full_json: results, // Full Backup
-        
-        // Transparency Fields
-        model_name: results.model_name,
-        scaling_factor: results.scaling_factor || results.technical_analysis?.scaling.cm_per_pixel || null,
-        estimated_height_cm: results.estimated_height_cm || null,
-        thought_summary: results.thought_summary || null,
-        landmarks_json: landmarksJson,
-        token_count: results.usage_metadata?.totalTokenCount || null,
-        thinking_tokens: results.usage_metadata?.thinkingTokenCount || null,
-        api_cost_usd: cost
-      };
-
-      console.log("[Supabase] Inserting measurement record (Attempt 1)...");
-      const { data, error } = await supabase
-        .from('measurements')
-        .insert([fullPayload])
-        .select()
-        .single();
-      
-      measurementData = data;
-      measurementError = error;
-    } catch (e) {
-      measurementError = e;
-    }
-
-    if (measurementError) {
-       console.error("[Supabase] Insert Attempt 1 failed:", measurementError);
-       
-       // ATTEMPT 2: Fallback to Minimal Schema (if Full failed due to column mismatch)
-       console.warn("[Supabase] Attempting minimal fallback save (checking for schema mismatch).");
-      
-       const backupPayload = {
-        id: scanId,
+    // 2. Save Main Record
+    const { data: measurementData, error: measurementError } = await supabase!
+      .from('measurements')
+      .insert({
         user_id: user ? user.id : null,
-        full_json: results, // Use full_json to save everything without schema constraints
+        session_id: sessionId,
         height: stats.height,
-        gender: stats.gender || 'Not Specified',
-        session_id: logger.getSessionId()
-       };
-
-       try {
-        const { data, error } = await supabase
-          .from('measurements')
-          .insert([backupPayload])
-          .select()
-          .single();
-          
-        measurementData = data;
-        measurementError = error; // Update error to the fallback result
-        if (!error) {
-          console.log("[Supabase] Fallback save successful.");
-        }
-       } catch (fallbackErr) {
-         console.error("[Supabase] Critical: Fallback save also failed.", fallbackErr);
-         measurementError = fallbackErr;
-       }
-    }
-
-    if (measurementError) {
-      console.error("[Supabase] Final Save Error:", measurementError);
-      return { success: false, data: null, error: measurementError };
-    }
-
-    console.log("[Supabase] Measurement record saved successfully.");
-
-    // 3. Insert Related Data (Images)
-    if (measurementData) {
-        const imagePayloads = [];
-        if (frontUrl) imagePayloads.push({ measurement_id: scanId, view_type: 'front', public_url: frontUrl, storage_path: `scans/${userId}/${scanId}/front_${timestamp}.jpg` });
-        if (sideUrl) imagePayloads.push({ measurement_id: scanId, view_type: 'side', public_url: sideUrl, storage_path: `scans/${userId}/${scanId}/side_${timestamp}.jpg` });
-        if (objUrl) imagePayloads.push({ measurement_id: scanId, view_type: 'model_obj', public_url: objUrl, storage_path: `scans/${userId}/${scanId}/model_${timestamp}.obj` });
+        weight: stats.weight,
+        gender: stats.gender,
+        age: stats.age,
         
-        if (imagePayloads.length > 0) {
-            const { error: imgError } = await supabase.from('measurement_images').insert(imagePayloads);
-            if (imgError) console.warn("[Supabase] Failed to link images to measurement:", imgError);
-        }
+        chest: results.chest,
+        waist: results.waist,
+        hips: results.hips,
+        shoulder: results.shoulder,
+        neck: results.neck,
+        sleeve: results.sleeve,
+        inseam: results.inseam,
+        
+        confidence: results.confidence,
+        model_name: results.model_name,
+        scaling_factor: results.scaling_factor,
+        estimated_height_cm: results.estimated_height_cm,
+        thought_summary: results.thought_summary,
+        
+        token_count: results.usage_metadata?.totalTokenCount || results.token_count,
+        thinking_tokens: results.usage_metadata?.thinkingTokenCount,
+        
+        // Full JSON Backup
+        full_json: results,
+        landmarks_json: results.landmarks
+      })
+      .select()
+      .single();
+
+    if (measurementError) throw measurementError;
+
+    // 3. Save Image References
+    if (measurementData) {
+      if (frontUrl) {
+        await supabase!.from('measurement_images').insert({
+          measurement_id: measurementData.id,
+          view_type: 'front',
+          public_url: frontUrl
+        });
+      }
+      if (sideUrl) {
+         await supabase!.from('measurement_images').insert({
+          measurement_id: measurementData.id,
+          view_type: 'side',
+          public_url: sideUrl
+        });
+      }
     }
 
-    return { success: true, data: measurementData, error: null };
+    return { success: true, id: measurementData.id };
 
-  } catch (err: any) {
-    console.error("[Supabase] Unexpected error during save:", err);
-    return { success: false, data: null, error: err };
+  } catch (error: any) {
+    console.error("Save Scan Error:", error);
+    return { success: false, error };
   }
+};
+
+export const getScans = async (limit = 20) => {
+  if (!supabase && !initSupabase()) return [];
+  
+  const { data, error } = await supabase!
+    .from('measurements')
+    .select('*')
+    .order('created_at', { ascending: false })
+    .limit(limit);
+    
+  if (error) {
+    console.error("Get Scans Error:", error);
+    return [];
+  }
+  return data;
 };
