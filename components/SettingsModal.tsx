@@ -39,19 +39,22 @@ export const SettingsModal: React.FC<Props> = ({ isOpen, onClose, onNavigateToAd
         setKey(config.key || '');
         setUsingEnvVars(false);
       } else {
-        // 2. If not stored, check if we found Env Vars (even if connection failed, it helps to show what we found)
+        // 2. Check detected environment variables
         const envConfig = getSupabaseConfig();
         
         if (isConnected && !stored) {
           // Connected + No Storage = Connected via Env Vars
           setUsingEnvVars(true);
-          setUrl(envConfig.url || ''); // Pre-fill for visibility
+          setUrl(envConfig.url || ''); 
           setKey(envConfig.key ? '••••••••' : ''); 
-        } else if (!isConnected) {
-          // Not connected? Pre-fill with partial env vars to help debug why it failed
-          if (envConfig.url) setUrl(envConfig.url);
-          if (envConfig.key) setKey(envConfig.key);
-          setUsingEnvVars(false);
+        } else {
+          // Not connected, OR explicitly checking.
+          // Pre-fill found vars anyway to help debug why connection failed (e.g. valid URL but bad Key)
+          if (envConfig.url || envConfig.key) {
+             setUrl(envConfig.url || '');
+             setKey(envConfig.key || '');
+             // We don't set 'usingEnvVars' to true here, because they evidently failed or we want user to confirm them.
+          }
         }
       }
       
@@ -225,3 +228,155 @@ create policy "Public Select Scans" on storage.objects for select using ( bucket
               <h4 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3 flex items-center gap-2">
                 <Activity size={14} /> AI Model Strategy
               </h4>
+              <div className="space-y-3">
+                <label className="flex items-center gap-3 p-3 rounded-lg border border-slate-200 cursor-pointer hover:bg-slate-50 transition-colors">
+                  <input 
+                    type="radio" 
+                    name="model" 
+                    value="gemini-3-pro-preview" 
+                    checked={selectedModel === 'gemini-3-pro-preview'} 
+                    onChange={(e) => setSelectedModel(e.target.value)}
+                    className="w-4 h-4 text-blue-600 focus:ring-blue-500"
+                  />
+                  <div>
+                    <span className="block font-bold text-slate-900 text-sm">Gemini 3 Pro</span>
+                    <span className="block text-xs text-slate-500">Highest accuracy, slower reasoning</span>
+                  </div>
+                </label>
+
+                <label className="flex items-center gap-3 p-3 rounded-lg border border-slate-200 cursor-pointer hover:bg-amber-50/50 transition-colors">
+                  <input 
+                    type="radio" 
+                    name="model" 
+                    value="gemini-2.5-flash" 
+                    checked={selectedModel === 'gemini-2.5-flash'} 
+                    onChange={(e) => setSelectedModel(e.target.value)}
+                    className="w-4 h-4 text-amber-600 focus:ring-amber-500"
+                  />
+                  <div>
+                    <span className="block font-bold text-slate-900 text-sm flex items-center gap-1">
+                      Gemini 2.5 Flash <CloudLightning size={10} className="text-amber-500"/>
+                    </span>
+                    <span className="block text-xs text-slate-500">Faster, includes Thinking logic</span>
+                  </div>
+                </label>
+              </div>
+            </div>
+
+            <hr className="border-slate-100" />
+
+            {/* Supabase Config Section */}
+            <div>
+              <div className="flex justify-between items-center mb-3">
+                <h4 className="text-xs font-bold text-slate-500 uppercase tracking-wider flex items-center gap-2">
+                  <Database size={14} /> Cloud Database
+                </h4>
+                <div className={`px-2 py-0.5 rounded text-[10px] font-bold flex items-center gap-1 uppercase ${connected ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-600'}`}>
+                  {connected ? <CheckCircle size={10} /> : <AlertCircle size={10} />}
+                  {connected ? 'Connected' : 'Not Connected'}
+                </div>
+              </div>
+              
+              {usingEnvVars ? (
+                <div className="bg-blue-50 p-4 rounded-lg border border-blue-200 mb-4 text-center">
+                  <Shield size={24} className="mx-auto text-blue-600 mb-2" />
+                  <p className="text-sm text-blue-800 font-bold">Using Environment Variables</p>
+                  <p className="text-xs text-blue-600 mt-1">
+                    Supabase configuration is loaded securely from your Vercel/System environment.
+                  </p>
+                  <button 
+                    type="button" 
+                    onClick={() => setUsingEnvVars(false)}
+                    className="mt-3 text-xs text-blue-700 underline hover:text-blue-900"
+                  >
+                    Override manually
+                  </button>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">Project URL</label>
+                    <input 
+                      type="url" 
+                      value={url}
+                      onChange={(e) => setUrl(e.target.value)}
+                      placeholder="https://xyz.supabase.co"
+                      className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">Anon Key</label>
+                    <input 
+                      type="password" 
+                      value={key}
+                      onChange={(e) => setKey(e.target.value)}
+                      placeholder="eyJhbGciOiJIUzI1NiIsInR5..."
+                      className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none font-mono"
+                    />
+                  </div>
+                  <div className="text-[10px] text-slate-400">
+                    Use the <b>anon / public</b> key. This configuration is saved locally in your browser.
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <button 
+              type="submit" 
+              className={`w-full py-3 rounded-lg font-bold flex items-center justify-center gap-2 transition-all ${saved ? 'bg-green-600 text-white' : 'bg-slate-900 text-white hover:bg-slate-800'}`}
+            >
+              {saved ? <CheckCircle size={18} /> : <Save size={18} />}
+              {saved ? 'Saved Successfully' : 'Save Changes'}
+            </button>
+          </form>
+
+          {/* Admin Tools */}
+          <div className="pt-6 border-t border-slate-100">
+             <div className="flex gap-2">
+                <button 
+                  onClick={() => setShowSchema(!showSchema)}
+                  className="flex-1 py-2 bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs font-bold rounded-lg flex items-center justify-center gap-2"
+                >
+                  <Code size={14} /> Get SQL Schema
+                </button>
+                {connected && onNavigateToAdmin && (
+                  <button 
+                    onClick={onNavigateToAdmin}
+                    className="flex-1 py-2 bg-blue-50 hover:bg-blue-100 text-blue-600 text-xs font-bold rounded-lg flex items-center justify-center gap-2"
+                  >
+                    <Shield size={14} /> Admin Dashboard
+                  </button>
+                )}
+             </div>
+          </div>
+
+        </div>
+      </div>
+
+      {/* Schema Modal Overlay */}
+      {showSchema && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-black/80 backdrop-blur-md">
+           <div className="bg-slate-900 w-full max-w-2xl rounded-xl overflow-hidden shadow-2xl border border-slate-700 flex flex-col max-h-[80vh]">
+              <div className="p-4 border-b border-slate-700 flex justify-between items-center bg-slate-800">
+                 <h4 className="text-white font-bold flex items-center gap-2"><Database size={16}/> Database Setup SQL</h4>
+                 <button onClick={() => setShowSchema(false)} className="text-slate-400 hover:text-white"><X size={20}/></button>
+              </div>
+              <div className="flex-1 overflow-auto p-0 bg-[#0d1117]">
+                 <pre className="text-[10px] font-mono text-slate-300 p-4 leading-relaxed">{schemaSQL}</pre>
+              </div>
+              <div className="p-4 bg-slate-800 border-t border-slate-700 flex justify-between items-center">
+                 <a href="https://supabase.com/dashboard" target="_blank" rel="noreferrer" className="text-blue-400 text-xs hover:underline flex items-center gap-1"><ExternalLink size={12}/> Open Supabase Dashboard</a>
+                 <button 
+                   onClick={() => copyToClipboard(schemaSQL)}
+                   className={`px-4 py-2 rounded-lg font-bold text-xs flex items-center gap-2 ${copied ? 'bg-green-600 text-white' : 'bg-white text-slate-900 hover:bg-slate-200'}`}
+                 >
+                    {copied ? <CheckCircle size={14}/> : <Copy size={14}/>}
+                    {copied ? 'Copied!' : 'Copy SQL'}
+                 </button>
+              </div>
+           </div>
+        </div>
+      )}
+    </div>
+  );
+};

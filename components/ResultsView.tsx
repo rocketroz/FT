@@ -57,10 +57,12 @@ export const ResultsView: React.FC<Props> = ({ results, stats, onReset, image, s
       { objBlob, usdzBlob }
     );
 
-    if (result) {
+    if (result.success) {
       setSaveStatus('saved');
     } else {
       setSaveStatus('error');
+      // Show explicit error to user
+      alert(`Save Failed: ${result.error?.message || "Unknown error"}. Check console for details.`);
     }
   };
 
@@ -149,9 +151,20 @@ export const ResultsView: React.FC<Props> = ({ results, stats, onReset, image, s
           <button onClick={onReset} className="px-4 py-2 rounded-lg border border-slate-200 font-bold text-slate-600 hover:bg-slate-50 flex items-center gap-2">
             <RefreshCcw size={16} /> New Scan
           </button>
-          <button onClick={handleSaveToCloud} disabled={saveStatus === 'saving' || saveStatus === 'saved'} className={`px-4 py-2 rounded-lg font-bold flex items-center gap-2 text-white shadow-md transition-all ${saveStatus === 'saved' ? 'bg-green-600' : 'bg-blue-600 hover:bg-blue-700'}`}>
-            {saveStatus === 'saved' ? <CheckCircle2 size={16} /> : <CloudUpload size={16} />}
-            {saveStatus === 'saved' ? 'Saved' : 'Save Results'}
+          <button 
+            onClick={handleSaveToCloud} 
+            disabled={saveStatus === 'saving' || saveStatus === 'saved'} 
+            className={`px-4 py-2 rounded-lg font-bold flex items-center gap-2 text-white shadow-md transition-all 
+              ${saveStatus === 'saved' ? 'bg-green-600' : 
+                saveStatus === 'error' ? 'bg-red-600 hover:bg-red-700' : 
+                'bg-blue-600 hover:bg-blue-700'}`}
+          >
+            {saveStatus === 'saved' ? <CheckCircle2 size={16} /> : 
+             saveStatus === 'error' ? <AlertCircle size={16} /> : 
+             <CloudUpload size={16} />}
+            {saveStatus === 'saved' ? 'Saved' : 
+             saveStatus === 'error' ? 'Retry Save' : 
+             'Save Results'}
           </button>
         </div>
       </div>

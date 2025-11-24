@@ -1,3 +1,4 @@
+
 import React, { useState } from 'react';
 import { signIn, signUp, signInWithGoogle } from '../services/supabaseService';
 import { Mail, Lock, LogIn, UserPlus } from 'lucide-react';
@@ -26,7 +27,7 @@ export const AuthForm: React.FC<Props> = ({ onAuthSuccess }) => {
         if (error) throw error;
         if (user) onAuthSuccess();
       } else {
-        const { user, error, session } = await signUp(email, password) as any; // Cast for session property access if type def varies
+        const { user, error, session } = await signUp(email, password);
         if (error) throw error;
         
         if (user) {
