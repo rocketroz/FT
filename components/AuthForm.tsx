@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { signIn, signUp, signInWithGoogle, isSupabaseConnected, onSupabaseConnectionChange, initSupabase } from '../services/supabaseService';
-import { Mail, Lock, LogIn, UserPlus, AlertTriangle, Settings, RefreshCw } from 'lucide-react';
+import { Mail, Lock, LogIn, UserPlus, AlertTriangle, Settings, RefreshCw, Plug } from 'lucide-react';
 
 interface Props {
   onAuthSuccess: () => void;
@@ -15,17 +15,17 @@ export const AuthForm: React.FC<Props> = ({ onAuthSuccess, onOpenSettings }) => 
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   
-  // Lazy init to capture connection status immediately on mount
+  // Initialize with current state to avoid flicker
   const [isConnected, setIsConnected] = useState(() => isSupabaseConnected());
 
   useEffect(() => {
-    // Subscribe to updates. The callback fires immediately with current state.
+    // Subscribe to updates. callback fires immediately with current status.
     const unsubscribe = onSupabaseConnectionChange((connected) => {
       setIsConnected(connected);
       if (connected) setError(null);
     });
 
-    // Attempt init if not connected
+    // Try to init if not connected on mount
     if (!isSupabaseConnected()) {
       initSupabase();
     }
@@ -39,7 +39,9 @@ export const AuthForm: React.FC<Props> = ({ onAuthSuccess, onOpenSettings }) => 
     const connected = initSupabase();
     setIsConnected(connected);
     if (!connected) {
-      setError("Still disconnected. Please check settings.");
+      setError("Still disconnected. Please check connection settings.");
+    } else {
+      setError(null);
     }
   };
 
@@ -50,6 +52,10 @@ export const AuthForm: React.FC<Props> = ({ onAuthSuccess, onOpenSettings }) => 
     setMessage(null);
 
     try {
+      if (!isConnected && !initSupabase()) {
+        throw new Error("Database not connected. Please configure settings.");
+      }
+
       if (isLogin) {
         const { user, error } = await signIn(email, password);
         if (error) throw error;
@@ -79,12 +85,10 @@ export const AuthForm: React.FC<Props> = ({ onAuthSuccess, onOpenSettings }) => 
     setLoading(true);
     setError(null);
     
-    if (!isSupabaseConnected()) {
-      if (!initSupabase()) {
-        setError("Database Disconnected. Please configure Settings.");
-        setLoading(false);
-        return;
-      }
+    if (!initSupabase()) {
+      setError("Database Disconnected. Please configure Settings.");
+      setLoading(false);
+      return;
     }
 
     try {
@@ -108,35 +112,37 @@ export const AuthForm: React.FC<Props> = ({ onAuthSuccess, onOpenSettings }) => 
       </p>
 
       {!isConnected && (
-        <div className="bg-amber-50 text-amber-800 p-4 rounded-lg text-sm mb-4 border border-amber-200 flex flex-col gap-2">
+        <div className="bg-amber-50 text-amber-800 p-4 rounded-lg text-sm mb-4 border border-amber-200 flex flex-col gap-3 animate-pulse-slow">
            <div className="flex items-center gap-2 font-bold">
              <AlertTriangle size={16} />
-             <span>Database Disconnected</span>
+             <span>Database Not Connected</span>
            </div>
-           <div className="text-amber-700/80 text-xs">
-             The app needs a database connection to save results.
+           <div className="text-amber-700/80 text-xs leading-relaxed">
+             The app requires a Supabase connection to save results. You can connect securely in Settings.
            </div>
            
-           <div className="flex gap-2 mt-1">
+           <div className="flex gap-2">
              <button 
+               type="button"
                onClick={handleRetry} 
-               className="px-3 py-1.5 bg-amber-100 hover:bg-amber-200 text-amber-800 rounded text-xs font-bold transition-colors flex items-center gap-1"
+               className="px-3 py-2 bg-amber-100 hover:bg-amber-200 text-amber-800 rounded-lg text-xs font-bold transition-colors flex items-center gap-1"
              >
                <RefreshCw size={12} /> Retry
              </button>
              {onOpenSettings && (
                <button 
+                 type="button"
                  onClick={onOpenSettings} 
-                 className="px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded text-xs font-bold flex items-center gap-1 transition-colors"
+                 className="flex-1 px-3 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-xs font-bold flex items-center justify-center gap-2 transition-colors shadow-sm"
                >
-                 <Settings size={12} /> Connect Database
+                 <Plug size={14} /> Connect Database
                </button>
              )}
            </div>
         </div>
       )}
 
-      {error && <div className="bg-red-50 text-red-600 p-3 rounded-lg text-sm mb-4 font-medium flex items-center gap-2"><div className="w-1.5 h-1.5 rounded-full bg-red-600"></div>{error}</div>}
+      {error && <div className="bg-red-50 text-red-600 p-3 rounded-lg text-sm mb-4 font-medium flex items-center gap-2 border border-red-100"><div className="w-1.5 h-1.5 rounded-full bg-red-600 shrink-0"></div>{error}</div>}
       {message && <div className="bg-green-50 text-green-700 p-3 rounded-lg text-sm mb-4 font-medium border border-green-200">{message}</div>}
 
       <form onSubmit={handleSubmit} className="space-y-4">
@@ -149,8 +155,9 @@ export const AuthForm: React.FC<Props> = ({ onAuthSuccess, onOpenSettings }) => 
               required
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              className="w-full pl-10 pr-4 py-2.5 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+              className="w-full pl-10 pr-4 py-2.5 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none transition-all disabled:bg-slate-100"
               placeholder="you@example.com"
+              disabled={loading}
             />
           </div>
         </div>
@@ -164,8 +171,9 @@ export const AuthForm: React.FC<Props> = ({ onAuthSuccess, onOpenSettings }) => 
               required
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className="w-full pl-10 pr-4 py-2.5 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+              className="w-full pl-10 pr-4 py-2.5 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none transition-all disabled:bg-slate-100"
               placeholder="••••••••"
+              disabled={loading}
             />
           </div>
         </div>
@@ -173,7 +181,7 @@ export const AuthForm: React.FC<Props> = ({ onAuthSuccess, onOpenSettings }) => 
         <button 
           type="submit" 
           disabled={loading || !isConnected}
-          className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-slate-300 disabled:cursor-not-allowed text-white font-bold py-3 rounded-lg transition-all flex items-center justify-center gap-2"
+          className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-slate-300 disabled:cursor-not-allowed text-white font-bold py-3 rounded-lg transition-all flex items-center justify-center gap-2 shadow-md hover:shadow-lg hover:-translate-y-0.5"
         >
           {loading ? 'Processing...' : (isLogin ? <><LogIn size={18}/> Sign In</> : <><UserPlus size={18}/> Sign Up</>)}
         </button>
@@ -181,6 +189,7 @@ export const AuthForm: React.FC<Props> = ({ onAuthSuccess, onOpenSettings }) => 
       
       <div className="mt-4 pt-4 border-t border-slate-100 text-center">
         <button 
+          type="button"
           onClick={() => { setIsLogin(!isLogin); setError(null); setMessage(null); }}
           className="text-sm text-blue-600 hover:underline font-medium"
         >
@@ -192,7 +201,7 @@ export const AuthForm: React.FC<Props> = ({ onAuthSuccess, onOpenSettings }) => 
           <button 
             type="button"
             onClick={handleGoogleLogin}
-            disabled={!isConnected}
+            disabled={!isConnected || loading}
             className="w-full border border-slate-200 hover:bg-slate-50 disabled:opacity-50 disabled:hover:bg-white text-slate-700 font-medium py-2.5 rounded-lg transition-all flex items-center justify-center gap-2 text-sm"
           >
              <svg className="w-4 h-4" viewBox="0 0 24 24"><path fill="currentColor" d="M21.35 11.1h-9.17v2.73h6.51c-.33 3.81-3.5 5.44-6.5 5.44C8.36 19.27 5 16.25 5 12c0-4.1 3.2-7.27 7.2-7.27c3.09 0 4.9 1.97 4.9 1.97L19 4.72S16.56 2 12.1 2C6.42 2 2.03 6.8 2.03 12c0 5.05 4.13 10 10.22 10c5.35 0 9.25-3.67 9.25-9.09c0-1.15-.15-1.82-.15-1.82Z"/></svg>

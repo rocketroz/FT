@@ -16,7 +16,7 @@ export const isSupabaseConnected = (): boolean => {
 
 export const onSupabaseConnectionChange = (callback: (isConnected: boolean) => void) => {
   connectionListeners.add(callback);
-  // Fire immediately with current state
+  // Fire immediately with current state so components sync on mount
   callback(!!supabase);
   return () => {
     connectionListeners.delete(callback);
@@ -24,7 +24,13 @@ export const onSupabaseConnectionChange = (callback: (isConnected: boolean) => v
 };
 
 const notifyListeners = (status: boolean) => {
-  connectionListeners.forEach(cb => cb(status));
+  connectionListeners.forEach(cb => {
+    try {
+      cb(status);
+    } catch (e) {
+      console.error("Error in connection listener:", e);
+    }
+  });
 };
 
 // Helper to check if localStorage is available and working
@@ -39,40 +45,40 @@ const isStorageAvailable = () => {
   }
 };
 
-// Robust configuration getter
+// Helper to validate URL to avoid crashes
+const isValidUrl = (urlString: string) => {
+  try { 
+    return Boolean(new URL(urlString)); 
+  }
+  catch(e){ 
+    return false; 
+  }
+};
+
+// Robust configuration getter that safely checks multiple environments
 export const getSupabaseConfig = () => {
   let url = '';
   let key = '';
 
-  // 1. Try Vite / Import Meta (Modern Bundlers)
-  try {
-    // @ts-ignore
-    if (typeof import.meta !== 'undefined' && import.meta.env) {
+  const getEnv = (name: string) => {
+    try {
       // @ts-ignore
-      url = import.meta.env.VITE_SUPABASE_URL || import.meta.env.SUPABASE_URL || import.meta.env.REACT_APP_SUPABASE_URL || '';
-      // @ts-ignore
-      key = import.meta.env.VITE_SUPABASE_ANON_KEY || import.meta.env.SUPABASE_ANON_KEY || import.meta.env.REACT_APP_SUPABASE_ANON_KEY || '';
-    }
-  } catch (e) { 
-    // Ignore syntax errors in older environments
-  }
-
-  // 2. Try Process Env (Node/Legacy/Webpack fallback)
-  if (!url || !key) {
+      if (typeof import.meta !== 'undefined' && import.meta.env) {
+        // @ts-ignore
+        const val = import.meta.env[name] || import.meta.env[`VITE_${name}`];
+        if (val) return val;
+      }
+    } catch (e) {}
     try {
       if (typeof process !== 'undefined' && process.env) {
-        url = process.env.VITE_SUPABASE_URL || 
-              process.env.NEXT_PUBLIC_SUPABASE_URL || 
-              process.env.REACT_APP_SUPABASE_URL || 
-              process.env.SUPABASE_URL || url;
-              
-        key = process.env.VITE_SUPABASE_ANON_KEY || 
-              process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 
-              process.env.REACT_APP_SUPABASE_ANON_KEY || 
-              process.env.SUPABASE_ANON_KEY || key;
+        return process.env[name] || process.env[`VITE_${name}`] || process.env[`NEXT_PUBLIC_${name}`] || process.env[`REACT_APP_${name}`];
       }
-    } catch (e) { /* Ignore */ }
-  }
+    } catch (e) {}
+    return '';
+  };
+
+  url = getEnv('SUPABASE_URL') || getEnv('REACT_APP_SUPABASE_URL') || '';
+  key = getEnv('SUPABASE_ANON_KEY') || getEnv('REACT_APP_SUPABASE_ANON_KEY') || '';
 
   return { url, key };
 };
@@ -87,14 +93,14 @@ export const initSupabase = (): boolean => {
       : { 
           auth: { 
             persistSession: false, 
-            autoRefreshToken: false,
+            autoRefreshToken: false, 
             detectSessionInUrl: true 
           } 
         };
 
     // 1. Priority: Check Environment Variables
     const config = getSupabaseConfig();
-    if (config.url && config.key) {
+    if (config.url && isValidUrl(config.url) && config.key) {
       console.log("[Supabase] Initializing from Environment Variables");
       supabase = createClient(config.url, config.key, options);
       notifyListeners(true);
@@ -107,7 +113,7 @@ export const initSupabase = (): boolean => {
         const stored = localStorage.getItem(STORAGE_KEY);
         if (stored) {
           const parsed = JSON.parse(stored);
-          if (parsed && parsed.url && parsed.key) {
+          if (parsed && parsed.url && isValidUrl(parsed.url) && parsed.key) {
             console.log("[Supabase] Initializing from LocalStorage");
             supabase = createClient(parsed.url, parsed.key, options);
             notifyListeners(true);
@@ -137,6 +143,7 @@ export const initSupabase = (): boolean => {
 export const configureSupabase = (url: string, key: string) => {
   try {
     if (!url || !key) throw new Error("URL and Key are required");
+    if (!isValidUrl(url)) throw new Error("Invalid URL format");
 
     const options = isStorageAvailable() 
       ? {} 
@@ -198,6 +205,7 @@ export const signInWithGoogle = async () => {
 export const signOut = async () => {
   if (!supabase) return;
   await supabase.auth.signOut();
+  notifyListeners(true); // Keep connected status, just signed out
 };
 
 export const getUser = async (): Promise<User | null> => {
@@ -256,12 +264,11 @@ export const saveScanResult = async (
 
   try {
     const user = await getUser();
-    const userId = user ? user.id : 'anon';
-    const sessionId = logger.getSessionId(); // Link to debug logs
+    const sessionId = logger.getSessionId();
 
     // 1. Upload Images
-    const frontUrl = await uploadImage(userId, images.front, 'front');
-    const sideUrl = await uploadImage(userId, images.side, 'side');
+    const frontUrl = await uploadImage(user ? user.id : 'anon', images.front, 'front');
+    const sideUrl = await uploadImage(user ? user.id : 'anon', images.side, 'side');
 
     // 2. Save Main Record
     const insertResult = await supabase!
