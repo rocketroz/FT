@@ -27,7 +27,11 @@ export const SettingsModal: React.FC<Props> = ({ isOpen, onClose, onNavigateToAd
       const isConnected = isSupabaseConnected();
       setConnected(isConnected);
       
-      const stored = localStorage.getItem('fit_twin_supabase_config');
+      let stored = null;
+      try {
+        stored = localStorage.getItem('fit_twin_supabase_config');
+      } catch (e) { console.warn("Incognito: LocalStorage read failed"); }
+
       if (stored) {
         const config = JSON.parse(stored);
         setUrl(config.url || '');
@@ -164,8 +168,7 @@ create policy "Public Select Images" on public.measurement_images for select usi
 drop policy if exists "Public Insert Calcs" on public.measurement_calculations;
 create policy "Public Insert Calcs" on public.measurement_calculations for insert with check (true);
 
-drop policy if exists "Public Select Calcs" on public.measurement_calculations;
-create policy "Public Select Calcs" on public.measurement_calculations for select using (true);
+drop policy if exists "Public Select Calcs" on public.measurement_calculations for select using (true);
 
 -- Debug Logs
 drop policy if exists "Public Insert Logs" on public.debug_logs;

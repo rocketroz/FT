@@ -68,16 +68,24 @@ const App: React.FC = () => {
 
   // Load preferred model from local storage on mount
   useEffect(() => {
-    const savedModel = localStorage.getItem('fit_twin_model_preference');
-    if (savedModel) {
-      setActiveModel(savedModel);
+    try {
+      const savedModel = localStorage.getItem('fit_twin_model_preference');
+      if (savedModel) {
+        setActiveModel(savedModel);
+      }
+    } catch (e) {
+      console.warn("LocalStorage blocked (Incognito?) - using default model");
     }
   }, []);
 
   const handleModelChange = (model: string) => {
     logger.info("Model changed", { old: activeModel, new: model });
     setActiveModel(model);
-    localStorage.setItem('fit_twin_model_preference', model);
+    try {
+      localStorage.setItem('fit_twin_model_preference', model);
+    } catch (e) {
+      console.warn("LocalStorage blocked (Incognito?) - preference not saved");
+    }
   };
 
   const handleStatsSubmit = (data: UserStats) => {

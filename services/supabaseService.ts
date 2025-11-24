@@ -7,38 +7,38 @@ const STORAGE_KEY = 'fit_twin_supabase_config';
 export let supabase: SupabaseClient | null = null;
 
 // Helper to safely access env vars across different build tools (Vite, CRA, Next.js)
-const getEnvVar = (key: string): string | undefined => {
-  // 1. Try standard process.env (Node/Webpack/CRA)
-  if (typeof process !== 'undefined' && process.env) {
-    // Check direct, REACT_APP_, and VITE_ prefixes
-    const direct = process.env[key];
-    const reactApp = process.env[`REACT_APP_${key}`];
-    const vite = process.env[`VITE_${key}`];
-    if (direct) return direct;
-    if (reactApp) return reactApp;
-    if (vite) return vite;
-  }
+// NOTE: We must check specific keys statically for bundlers (Webpack/Vite) to replace them correctly.
+// Dynamic access like process.env['VITE_' + key] often fails during build optimization.
+const getSupabaseConfig = () => {
+  let url = '';
+  let key = '';
 
-  // 2. Try import.meta.env (Vite native)
+  // 1. Try Vite (import.meta.env)
   // @ts-ignore
   if (typeof import.meta !== 'undefined' && import.meta.env) {
     // @ts-ignore
-    const metaDirect = import.meta.env[key];
+    url = import.meta.env.VITE_SUPABASE_URL || import.meta.env.SUPABASE_URL || import.meta.env.REACT_APP_SUPABASE_URL;
     // @ts-ignore
-    const metaVite = import.meta.env[`VITE_${key}`];
-    if (metaDirect) return metaDirect;
-    if (metaVite) return metaVite;
+    key = import.meta.env.VITE_SUPABASE_ANON_KEY || import.meta.env.SUPABASE_ANON_KEY || import.meta.env.REACT_APP_SUPABASE_ANON_KEY;
   }
 
-  return undefined;
+  // 2. Try Node/CRA (process.env)
+  // Check if we found them yet, otherwise check process.env
+  if (!url || !key) {
+    if (typeof process !== 'undefined' && process.env) {
+      url = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || process.env.REACT_APP_SUPABASE_URL || '';
+      key = process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY || process.env.REACT_APP_SUPABASE_ANON_KEY || '';
+    }
+  }
+
+  return { url, key };
 };
 
 // Initialize Supabase Logic
 export const initSupabase = (): boolean => {
   try {
     // Check Environment Variables First (Vercel/Deployment)
-    const envUrl = getEnvVar('SUPABASE_URL');
-    const envKey = getEnvVar('SUPABASE_ANON_KEY');
+    const { url: envUrl, key: envKey } = getSupabaseConfig();
 
     if (envUrl && envKey) {
       supabase = createClient(envUrl, envKey);
@@ -47,15 +47,21 @@ export const initSupabase = (): boolean => {
     }
 
     // Fallback to Local Storage (Manual Settings)
-    const stored = localStorage.getItem(STORAGE_KEY);
-    if (stored) {
-      const { url, key } = JSON.parse(stored);
-      if (url && key) {
-        supabase = createClient(url, key);
-        // logger.info("Supabase connected via Local Settings");
-        return true;
+    // Wrap in try-catch specifically for SecurityError in Incognito/Private modes
+    try {
+      const stored = localStorage.getItem(STORAGE_KEY);
+      if (stored) {
+        const { url, key } = JSON.parse(stored);
+        if (url && key) {
+          supabase = createClient(url, key);
+          // logger.info("Supabase connected via Local Settings");
+          return true;
+        }
       }
+    } catch (storageError) {
+      console.warn("LocalStorage access failed (likely Incognito/Private mode):", storageError);
     }
+
   } catch (e) {
     console.error("Error initializing Supabase client", e);
   }
@@ -64,7 +70,11 @@ export const initSupabase = (): boolean => {
 };
 
 export const configureSupabase = (url: string, key: string) => {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify({ url, key }));
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ url, key }));
+  } catch (e) {
+    console.warn("Could not save config to localStorage (Incognito?)", e);
+  }
   return initSupabase();
 };
 
