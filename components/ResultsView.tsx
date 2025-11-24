@@ -61,8 +61,21 @@ export const ResultsView: React.FC<Props> = ({ results, stats, onReset, image, s
       setSaveStatus('saved');
     } else {
       setSaveStatus('error');
-      // Show explicit error to user
-      alert(`Save Failed: ${result.error?.message || "Unknown error"}. Check console for details.`);
+      // Show explicit error to user, handling object errors gracefully
+      let errorMsg = "Unknown error";
+      // Explicitly cast result to the error variant to help TypeScript's control flow analysis
+      const errResult = result as { success: false; error: any };
+      
+      if (errResult.error) {
+         const err = errResult.error;
+         if (typeof err === 'string') errorMsg = err;
+         else if (typeof err === 'object') {
+             // Use any cast for safe access to message on unknown error object
+             const errObj = err as any;
+             errorMsg = errObj.message || JSON.stringify(errObj);
+         }
+      }
+      alert(`Save Failed: ${errorMsg}. Check console for details.`);
     }
   };
 

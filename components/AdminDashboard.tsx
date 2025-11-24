@@ -22,7 +22,7 @@ export const AdminDashboard: React.FC<Props> = ({ onBack }) => {
   const fetchScans = async () => {
     setLoading(true);
     const data = await getScans(50);
-    setScans(data);
+    setScans(data || []); // Ensure array
     setLoading(false);
   };
 
@@ -120,7 +120,7 @@ export const AdminDashboard: React.FC<Props> = ({ onBack }) => {
                   {scans.length === 0 && !loading && (
                     <div className="p-8 text-center text-slate-400 text-sm">No scans found.</div>
                   )}
-                  {scans.map((scan) => {
+                  {scans?.map((scan) => {
                     const m = getMeasurementJson(scan);
                     const modelName = scan.model_name || m.model_name || 'unknown';
                     return (

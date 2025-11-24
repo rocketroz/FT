@@ -84,7 +84,7 @@ export const SettingsModal: React.FC<Props> = ({ isOpen, onClose, onNavigateToAd
   const schemaSQL = `
 -- 1. Create Tables (Idempotent)
 create table if not exists public.measurements (
-  id uuid primary key,
+  id uuid default gen_random_uuid() primary key,
   session_id text, -- Link to debug_logs for troubleshooting
   user_id uuid, -- references auth.users(id) if using auth
   created_at timestamptz default now(),

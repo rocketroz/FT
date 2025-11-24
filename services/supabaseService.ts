@@ -55,6 +55,17 @@ const isValidUrl = (urlString: string) => {
   }
 };
 
+// Helper to generate UUIDs client-side
+const generateUUID = () => {
+  if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+    return crypto.randomUUID();
+  }
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+    var r = Math.random() * 16 | 0, v = c == 'x' ? r : (r & 0x3 | 0x8);
+    return v.toString(16);
+  });
+};
+
 // Robust configuration getter that safely checks multiple environments
 export const getSupabaseConfig = () => {
   let url = '';
@@ -259,7 +270,7 @@ export const saveScanResult = async (
   images: { front: string, side: string },
   meta: { front: any, side: any },
   models: { objBlob: Blob | null, usdzBlob: Blob | null }
-) => {
+): Promise<{ success: true; id: string } | { success: false; error: any }> => {
   if (!supabase && !initSupabase()) return { success: false, error: { message: "Database not connected" } };
 
   try {
@@ -271,9 +282,13 @@ export const saveScanResult = async (
     const sideUrl = await uploadImage(user ? user.id : 'anon', images.side, 'side');
 
     // 2. Save Main Record
+    // Explicitly generate ID here to avoid issues if the DB table was created without 'default gen_random_uuid()'
+    const measurementId = generateUUID();
+
     const insertResult = await supabase!
       .from('measurements')
       .insert({
+        id: measurementId, 
         user_id: user ? user.id : null,
         session_id: sessionId,
         height: stats.height,
@@ -327,11 +342,35 @@ export const saveScanResult = async (
       }
     }
 
-    return { success: true, id: measurementData.id };
+    return { success: true, id: measurementData?.id || measurementId };
 
   } catch (error: any) {
     console.error("Save Scan Error:", error);
-    return { success: false, error };
+    // Ensure we return an error object with a message, avoiding [object Object] in alerts
+    let cleanError = { message: "Unknown Save Error" };
+    
+    if (error) {
+      if (typeof error === 'string') {
+        cleanError = { message: error };
+      } else if (typeof error === 'object') {
+        // If it's a Supabase error it usually has a message property
+        if (error.message) {
+          cleanError = error;
+        } else {
+          // Fallback for weird objects
+          try {
+             cleanError = { message: JSON.stringify(error) };
+          } catch(e) {
+             cleanError = { message: "Error object could not be stringified" };
+          }
+        }
+      }
+    }
+
+    return { 
+      success: false, 
+      error: cleanError
+    };
   }
 };
 
@@ -348,5 +387,6 @@ export const getScans = async (limit = 20) => {
     console.error("Get Scans Error:", error);
     return [];
   }
-  return data;
+  // Safe return - explicitly return empty array if null
+  return data || [];
 };
