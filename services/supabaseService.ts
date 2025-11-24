@@ -4,14 +4,19 @@ import { logger } from './logger';
 
 const STORAGE_KEY = 'fit_twin_supabase_config';
 
+// Singleton instance
 export let supabase: SupabaseClient | null = null;
 
-// --- Connection Event System ---
+// Event Listeners for connection status
 const connectionListeners = new Set<(isConnected: boolean) => void>();
+
+export const isSupabaseConnected = (): boolean => {
+  return !!supabase;
+};
 
 export const onSupabaseConnectionChange = (callback: (isConnected: boolean) => void) => {
   connectionListeners.add(callback);
-  // Fire immediately with current state to prevent stale UI
+  // Fire immediately with current state
   callback(!!supabase);
   return () => {
     connectionListeners.delete(callback);
@@ -22,7 +27,7 @@ const notifyListeners = (status: boolean) => {
   connectionListeners.forEach(cb => cb(status));
 };
 
-// Helper to check if localStorage is writable
+// Helper to check if localStorage is available and working
 const isStorageAvailable = () => {
   try {
     const testKey = '__test_storage__';
@@ -34,6 +39,7 @@ const isStorageAvailable = () => {
   }
 };
 
+// Robust configuration getter
 export const getSupabaseConfig = () => {
   let url = '';
   let key = '';
@@ -47,7 +53,9 @@ export const getSupabaseConfig = () => {
       // @ts-ignore
       key = import.meta.env.VITE_SUPABASE_ANON_KEY || import.meta.env.SUPABASE_ANON_KEY || import.meta.env.REACT_APP_SUPABASE_ANON_KEY || '';
     }
-  } catch (e) { /* Ignore */ }
+  } catch (e) { 
+    // Ignore syntax errors in older environments
+  }
 
   // 2. Try Process Env (Node/Legacy/Webpack fallback)
   if (!url || !key) {
@@ -70,7 +78,7 @@ export const getSupabaseConfig = () => {
 };
 
 export const initSupabase = (): boolean => {
-  // If already initialized, just return true
+  // If already initialized, return true
   if (supabase) return true;
 
   try {
@@ -111,9 +119,8 @@ export const initSupabase = (): boolean => {
       }
     }
     
-    // Check if we failed
+    // Failed to initialize
     if (!supabase) {
-      // Don't log warning as error, it just means not configured yet
       notifyListeners(false);
       return false;
     }
@@ -153,10 +160,6 @@ export const configureSupabase = (url: string, key: string) => {
     notifyListeners(false);
     return false;
   }
-};
-
-export const isSupabaseConnected = (): boolean => {
-  return !!supabase;
 };
 
 // --- AUTH SERVICES ---

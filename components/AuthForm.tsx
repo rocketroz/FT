@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { signIn, signUp, signInWithGoogle, isSupabaseConnected, onSupabaseConnectionChange, initSupabase } from '../services/supabaseService';
-import { Mail, Lock, LogIn, UserPlus, AlertTriangle, Settings } from 'lucide-react';
+import { Mail, Lock, LogIn, UserPlus, AlertTriangle, Settings, RefreshCw } from 'lucide-react';
 
 interface Props {
   onAuthSuccess: () => void;
@@ -19,8 +19,7 @@ export const AuthForm: React.FC<Props> = ({ onAuthSuccess, onOpenSettings }) => 
   const [isConnected, setIsConnected] = useState(() => isSupabaseConnected());
 
   useEffect(() => {
-    // Subscribe to updates. The callback fires immediately with current state,
-    // ensuring we are always in sync.
+    // Subscribe to updates. The callback fires immediately with current state.
     const unsubscribe = onSupabaseConnectionChange((connected) => {
       setIsConnected(connected);
       if (connected) setError(null);
@@ -35,6 +34,14 @@ export const AuthForm: React.FC<Props> = ({ onAuthSuccess, onOpenSettings }) => 
       unsubscribe();
     };
   }, []);
+
+  const handleRetry = () => {
+    const connected = initSupabase();
+    setIsConnected(connected);
+    if (!connected) {
+      setError("Still disconnected. Please check settings.");
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -112,17 +119,17 @@ export const AuthForm: React.FC<Props> = ({ onAuthSuccess, onOpenSettings }) => 
            
            <div className="flex gap-2 mt-1">
              <button 
-               onClick={() => initSupabase()} 
-               className="px-3 py-1.5 bg-amber-100 hover:bg-amber-200 text-amber-800 rounded text-xs font-bold transition-colors"
+               onClick={handleRetry} 
+               className="px-3 py-1.5 bg-amber-100 hover:bg-amber-200 text-amber-800 rounded text-xs font-bold transition-colors flex items-center gap-1"
              >
-               Retry
+               <RefreshCw size={12} /> Retry
              </button>
              {onOpenSettings && (
                <button 
                  onClick={onOpenSettings} 
                  className="px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded text-xs font-bold flex items-center gap-1 transition-colors"
                >
-                 <Settings size={12} /> Configure
+                 <Settings size={12} /> Connect Database
                </button>
              )}
            </div>
