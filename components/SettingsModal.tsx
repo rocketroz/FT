@@ -82,8 +82,7 @@ export const SettingsModal: React.FC<Props> = ({ isOpen, onClose, onNavigateToAd
   };
 
   const schemaSQL = `
--- 1. Setup Extensions & Tables
--- Enable UUID extension for gen_random_uuid()
+-- 1. Setup Extensions (Required for UUID generation)
 create extension if not exists "uuid-ossp";
 create extension if not exists "pgcrypto";
 
@@ -209,7 +208,8 @@ create policy "Public Upload Scans" on storage.objects for insert with check ( b
 drop policy if exists "Public Select Scans" on storage.objects;
 create policy "Public Select Scans" on storage.objects for select using ( bucket_id = 'scans' );
 
--- 6. Analytics Views (FIX: Recreating without SECURITY DEFINER to resolve Supabase Linter errors)
+-- 6. Analytics Views
+-- Drop first to ensure fresh creation without SECURITY DEFINER (default is INVOKER, which fixes linter error)
 drop view if exists public.measurements_with_concerns;
 create view public.measurements_with_concerns as
 select 

@@ -347,7 +347,7 @@ export const saveScanResult = async (
   } catch (error: any) {
     console.error("Save Scan Error:", error);
     
-    // Ensure we return an error object with a message, avoiding [object Object] in alerts
+    // Aggressive Error Parsing to avoid [object Object]
     let errorMessage = "Unknown Save Error";
     
     try {
@@ -356,30 +356,23 @@ export const saveScanResult = async (
       } else if (error instanceof Error) {
         errorMessage = error.message;
       } else if (typeof error === 'object' && error !== null) {
-        // If it's a Supabase error it usually has a message property
+        // Try to find the most relevant message field
         const errObj = error as any;
-        if (errObj.message) {
-           if (typeof errObj.message === 'string') {
-             errorMessage = errObj.message;
-           } else {
-             // Case where message itself is an object
-             errorMessage = JSON.stringify(errObj.message);
-           }
-        } else if (errObj.error_description) {
-           // Sometimes Supabase Auth errors have error_description
-           errorMessage = errObj.error_description;
-        } else {
-           // Fallback for weird objects
-           errorMessage = JSON.stringify(error);
-        }
+        errorMessage = errObj.message || errObj.error_description || errObj.details || errObj.hint || JSON.stringify(errObj);
       }
-    } catch (e) {
-      errorMessage = "Error object could not be parsed";
+    } catch (parseError) {
+      errorMessage = "Error could not be parsed";
     }
 
-    // Filter out the dreaded [object Object] if it somehow slipped through
-    if (errorMessage === '[object Object]') {
-      errorMessage = "An unknown error occurred (details missing).";
+    // Final cleanup if stringify resulted in unhelpful strings
+    if (!errorMessage || errorMessage === '[object Object]' || errorMessage === '{}') {
+       try {
+         // Last resort: standard stringify
+         errorMessage = JSON.stringify(error);
+         if (errorMessage === '{}') errorMessage = "Unknown system error (empty object).";
+       } catch (e) {
+         errorMessage = "Critical: Unknown error occurred (unserializable).";
+       }
     }
 
     return { 
