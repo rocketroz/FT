@@ -82,7 +82,11 @@ export const SettingsModal: React.FC<Props> = ({ isOpen, onClose, onNavigateToAd
   };
 
   const schemaSQL = `
--- 1. Create Tables (Idempotent)
+-- 1. Setup Extensions & Tables
+-- Enable UUID extension for gen_random_uuid()
+create extension if not exists "uuid-ossp";
+create extension if not exists "pgcrypto";
+
 create table if not exists public.measurements (
   id uuid default gen_random_uuid() primary key,
   session_id text, -- Link to debug_logs for troubleshooting
@@ -204,6 +208,31 @@ create policy "Public Upload Scans" on storage.objects for insert with check ( b
 
 drop policy if exists "Public Select Scans" on storage.objects;
 create policy "Public Select Scans" on storage.objects for select using ( bucket_id = 'scans' );
+
+-- 6. Analytics Views (FIX: Recreating without SECURITY DEFINER to resolve Supabase Linter errors)
+drop view if exists public.measurements_with_concerns;
+create view public.measurements_with_concerns as
+select 
+  id, 
+  created_at, 
+  user_id,
+  model_name, 
+  confidence,
+  full_json->'fit_concerns' as fit_concerns
+from public.measurements
+where full_json->'fit_concerns' is not null 
+  and jsonb_array_length(full_json->'fit_concerns') > 0;
+
+drop view if exists public.model_performance;
+create view public.model_performance as
+select
+  model_name,
+  count(*) as total_scans,
+  avg(confidence) as avg_confidence,
+  avg(token_count) as avg_tokens,
+  avg(thinking_tokens) as avg_thinking_tokens
+from public.measurements
+group by model_name;
   `.trim();
 
   if (!isOpen) return null;

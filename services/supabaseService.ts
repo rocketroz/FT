@@ -270,7 +270,7 @@ export const saveScanResult = async (
   images: { front: string, side: string },
   meta: { front: any, side: any },
   models: { objBlob: Blob | null, usdzBlob: Blob | null }
-): Promise<{ success: true; id: string } | { success: false; error: any }> => {
+): Promise<{ success: true; id: string } | { success: false; error: { message: string } }> => {
   if (!supabase && !initSupabase()) return { success: false, error: { message: "Database not connected" } };
 
   try {
@@ -346,35 +346,50 @@ export const saveScanResult = async (
 
   } catch (error: any) {
     console.error("Save Scan Error:", error);
-    // Ensure we return an error object with a message, avoiding [object Object] in alerts
-    let cleanError = { message: "Unknown Save Error" };
     
-    if (error) {
+    // Ensure we return an error object with a message, avoiding [object Object] in alerts
+    let errorMessage = "Unknown Save Error";
+    
+    try {
       if (typeof error === 'string') {
-        cleanError = { message: error };
-      } else if (typeof error === 'object') {
+        errorMessage = error;
+      } else if (error instanceof Error) {
+        errorMessage = error.message;
+      } else if (typeof error === 'object' && error !== null) {
         // If it's a Supabase error it usually has a message property
-        if (error.message) {
-          cleanError = error;
+        const errObj = error as any;
+        if (errObj.message) {
+           if (typeof errObj.message === 'string') {
+             errorMessage = errObj.message;
+           } else {
+             // Case where message itself is an object
+             errorMessage = JSON.stringify(errObj.message);
+           }
+        } else if (errObj.error_description) {
+           // Sometimes Supabase Auth errors have error_description
+           errorMessage = errObj.error_description;
         } else {
-          // Fallback for weird objects
-          try {
-             cleanError = { message: JSON.stringify(error) };
-          } catch(e) {
-             cleanError = { message: "Error object could not be stringified" };
-          }
+           // Fallback for weird objects
+           errorMessage = JSON.stringify(error);
         }
       }
+    } catch (e) {
+      errorMessage = "Error object could not be parsed";
+    }
+
+    // Filter out the dreaded [object Object] if it somehow slipped through
+    if (errorMessage === '[object Object]') {
+      errorMessage = "An unknown error occurred (details missing).";
     }
 
     return { 
       success: false, 
-      error: cleanError
+      error: { message: errorMessage }
     };
   }
 };
 
-export const getScans = async (limit = 20) => {
+export const getScans = async (limit = 20): Promise<any[]> => {
   if (!supabase && !initSupabase()) return [];
   
   const { data, error } = await supabase!

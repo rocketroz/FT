@@ -117,7 +117,7 @@ export const AdminDashboard: React.FC<Props> = ({ onBack }) => {
                  <p className="text-xs text-slate-500">Last 50 entries</p>
                </div>
                <div className="overflow-y-auto flex-1 p-2 space-y-2">
-                  {scans.length === 0 && !loading && (
+                  {(!scans || scans.length === 0) && !loading && (
                     <div className="p-8 text-center text-slate-400 text-sm">No scans found.</div>
                   )}
                   {scans?.map((scan) => {

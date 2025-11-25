@@ -69,10 +69,14 @@ export const ResultsView: React.FC<Props> = ({ results, stats, onReset, image, s
       if (errResult.error) {
          const err = errResult.error;
          if (typeof err === 'string') errorMsg = err;
-         else if (typeof err === 'object') {
+         else if (typeof err === 'object' && err !== null) {
              // Use any cast for safe access to message on unknown error object
              const errObj = err as any;
-             errorMsg = errObj.message || JSON.stringify(errObj);
+             if (errObj.message && typeof errObj.message === 'string') {
+                 errorMsg = errObj.message;
+             } else {
+                 errorMsg = JSON.stringify(errObj);
+             }
          }
       }
       alert(`Save Failed: ${errorMsg}. Check console for details.`);
