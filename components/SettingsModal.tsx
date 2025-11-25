@@ -43,7 +43,7 @@ export const SettingsModal: React.FC<Props> = ({ isOpen, onClose, onNavigateToAd
         const envConfig = getSupabaseConfig();
         
         if (isConnected && !stored) {
-          // Connected + No Storage = Connected via Env Vars or Defaults
+          // Connected + No Storage = Connected via Env Vars
           setUsingEnvVars(true);
           setUrl(envConfig.url || ''); 
           setKey(envConfig.key ? '••••••••' : ''); 
@@ -80,6 +80,9 @@ export const SettingsModal: React.FC<Props> = ({ isOpen, onClose, onNavigateToAd
   };
 
   const schemaSQL = `
+-- Schema Version: 2.1 (Grants Added)
+-- NOTE: "Success. No rows returned" means this script worked!
+
 -- 1. SETUP EXTENSIONS
 create extension if not exists "uuid-ossp";
 create extension if not exists "pgcrypto";
@@ -163,7 +166,7 @@ alter table public.measurement_images enable row level security;
 alter table public.measurement_calculations enable row level security;
 alter table public.debug_logs enable row level security;
 
--- 4. POLICIES (Simplified naming to avoid syntax issues)
+-- 4. POLICIES
 
 -- Measurements
 drop policy if exists "policy_insert_measurements" on public.measurements;
@@ -228,6 +231,16 @@ select
   avg(thinking_tokens) as avg_thinking_tokens
 from public.measurements
 group by model_name;
+
+-- 7. PERMISSIONS (CRITICAL FOR ANON USERS)
+-- Grant usage on schema public to all users including anon
+grant usage on schema public to anon, authenticated, service_role;
+
+-- Grant access to tables
+grant all on table public.measurements to anon, authenticated, service_role;
+grant all on table public.measurement_images to anon, authenticated, service_role;
+grant all on table public.measurement_calculations to anon, authenticated, service_role;
+grant all on table public.debug_logs to anon, authenticated, service_role;
   `.trim();
 
   if (!isOpen) return null;
@@ -306,7 +319,7 @@ group by model_name;
                   <Shield size={24} className="mx-auto text-blue-600 mb-2" />
                   <p className="text-sm text-blue-800 font-bold">Automatic Configuration</p>
                   <p className="text-xs text-blue-600 mt-1">
-                    Supabase configuration is loaded from your Environment Variables or Defaults.
+                    Supabase configuration is loaded from your Environment Variables.
                   </p>
                   <button 
                     type="button" 

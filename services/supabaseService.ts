@@ -5,9 +5,9 @@ import { logger } from './logger';
 const STORAGE_KEY = 'fit_twin_supabase_config';
 
 // --- CONFIGURATION ---
-// Provided credentials for automatic connection
-const DEFAULT_URL = 'https://jgpohanlfydazveufmsk.supabase.co';
-const DEFAULT_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImpncG9oYW5sZnlkYXp2ZXVmbXNrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjM3OTc5NjEsImV4cCI6MjA3OTM3Mzk2MX0.ySx_ouGe7lqeW_4_V9OxsIM7jqGNi0bWTIhC2ktT888';
+// Defaults cleared to force user to input their own credentials via Settings
+const DEFAULT_URL = ''; 
+const DEFAULT_KEY = '';
 
 // Singleton instance
 export let supabase: SupabaseClient | null = null;
@@ -121,7 +121,7 @@ export const initSupabase = (): boolean => {
     // 1. Priority: Check Environment Variables & Defaults
     const config = getSupabaseConfig();
     if (config.url && isValidUrl(config.url) && config.key) {
-      console.log("[Supabase] Initializing from Environment/Defaults");
+      console.log("[Supabase] Initializing from Environment");
       supabase = createClient(config.url, config.key, options);
       notifyListeners(true);
       return true;
@@ -261,7 +261,7 @@ const uploadImage = async (userId: string, imageBase64: string, type: 'front' | 
       });
 
     if (error) {
-      console.error("Upload error:", error);
+      console.error("Upload error details:", error);
       return null;
     }
 
@@ -283,14 +283,25 @@ export const saveScanResult = async (
   if (!supabase && !initSupabase()) return { success: false, error: { message: "Database not connected" } };
 
   try {
+    // Debug logging
+    // @ts-ignore
+    const projectUrl = supabase['supabaseUrl'];
+    console.log(`[Supabase] Saving scan to project: ${projectUrl}`);
+
     const user = await getUser();
     const sessionId = logger.getSessionId();
 
     // 1. Upload Images
+    console.log("[Supabase] Uploading images...");
     const frontUrl = await uploadImage(user ? user.id : 'anon', images.front, 'front');
     const sideUrl = await uploadImage(user ? user.id : 'anon', images.side, 'side');
 
+    if (!frontUrl && !sideUrl) {
+      console.warn("[Supabase] Image upload failed, likely due to storage permission or bucket missing. Proceeding with data save.");
+    }
+
     // 2. Save Main Record
+    console.log("[Supabase] Inserting measurement record...");
     // Explicitly generate ID here to avoid issues if the DB table was created without 'default gen_random_uuid()'
     const measurementId = generateUUID();
 
@@ -329,7 +340,10 @@ export const saveScanResult = async (
       .select()
       .single();
 
-    if (insertResult.error) throw insertResult.error;
+    if (insertResult.error) {
+       console.error("[Supabase] Insert Error:", insertResult.error);
+       throw insertResult.error;
+    }
 
     const measurementData = insertResult.data;
 
@@ -351,10 +365,11 @@ export const saveScanResult = async (
       }
     }
 
+    console.log("[Supabase] Save complete!");
     return { success: true, id: measurementData?.id || measurementId };
 
   } catch (error: any) {
-    console.error("Save Scan Error:", error);
+    console.error("Save Scan Final Error:", error);
     
     // Aggressive Error Parsing to avoid [object Object]
     let errorMessage = "Unknown Save Error";
@@ -378,7 +393,7 @@ export const saveScanResult = async (
        try {
          // Last resort: standard stringify
          errorMessage = JSON.stringify(error);
-         if (errorMessage === '{}') errorMessage = "Unknown system error (empty object).";
+         if (errorMessage === '{}') errorMessage = "Unknown system error (empty object). Check network tab.";
        } catch (e) {
          errorMessage = "Critical: Unknown error occurred (unserializable).";
        }
