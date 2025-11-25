@@ -4,6 +4,11 @@ import { logger } from './logger';
 
 const STORAGE_KEY = 'fit_twin_supabase_config';
 
+// --- CONFIGURATION ---
+// Provided credentials for automatic connection
+const DEFAULT_URL = 'https://jgpohanlfydazveufmsk.supabase.co';
+const DEFAULT_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImpncG9oYW5sZnlkYXp2ZXVmbXNrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjM3OTc5NjEsImV4cCI6MjA3OTM3Mzk2MX0.ySx_ouGe7lqeW_4_V9OxsIM7jqGNi0bWTIhC2ktT888';
+
 // Singleton instance
 export let supabase: SupabaseClient | null = null;
 
@@ -66,7 +71,7 @@ const generateUUID = () => {
   });
 };
 
-// Robust configuration getter that safely checks multiple environments
+// Robust configuration getter that safely checks multiple environments and defaults
 export const getSupabaseConfig = () => {
   let url = '';
   let key = '';
@@ -91,6 +96,10 @@ export const getSupabaseConfig = () => {
   url = getEnv('SUPABASE_URL') || getEnv('REACT_APP_SUPABASE_URL') || '';
   key = getEnv('SUPABASE_ANON_KEY') || getEnv('REACT_APP_SUPABASE_ANON_KEY') || '';
 
+  // Fallback to defaults if env vars are missing
+  if (!url) url = DEFAULT_URL;
+  if (!key) key = DEFAULT_KEY;
+
   return { url, key };
 };
 
@@ -109,23 +118,23 @@ export const initSupabase = (): boolean => {
           } 
         };
 
-    // 1. Priority: Check Environment Variables
+    // 1. Priority: Check Environment Variables & Defaults
     const config = getSupabaseConfig();
     if (config.url && isValidUrl(config.url) && config.key) {
-      console.log("[Supabase] Initializing from Environment Variables");
+      console.log("[Supabase] Initializing from Environment/Defaults");
       supabase = createClient(config.url, config.key, options);
       notifyListeners(true);
       return true;
     }
 
-    // 2. Secondary: Check Local Storage (User Manual Config)
+    // 2. Secondary: Check Local Storage (User Manual Config overrides)
     if (isStorageAvailable()) {
       try {
         const stored = localStorage.getItem(STORAGE_KEY);
         if (stored) {
           const parsed = JSON.parse(stored);
           if (parsed && parsed.url && isValidUrl(parsed.url) && parsed.key) {
-            console.log("[Supabase] Initializing from LocalStorage");
+            console.log("[Supabase] Initializing from LocalStorage Override");
             supabase = createClient(parsed.url, parsed.key, options);
             notifyListeners(true);
             return true;

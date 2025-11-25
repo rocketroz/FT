@@ -39,21 +39,19 @@ export const SettingsModal: React.FC<Props> = ({ isOpen, onClose, onNavigateToAd
         setKey(config.key || '');
         setUsingEnvVars(false);
       } else {
-        // 2. Check detected environment variables
+        // 2. Check detected environment variables or defaults
         const envConfig = getSupabaseConfig();
         
         if (isConnected && !stored) {
-          // Connected + No Storage = Connected via Env Vars
+          // Connected + No Storage = Connected via Env Vars or Defaults
           setUsingEnvVars(true);
           setUrl(envConfig.url || ''); 
           setKey(envConfig.key ? '••••••••' : ''); 
         } else {
-          // Not connected, OR explicitly checking.
-          // Pre-fill found vars anyway to help debug why connection failed (e.g. valid URL but bad Key)
+          // Pre-fill config if available
           if (envConfig.url || envConfig.key) {
              setUrl(envConfig.url || '');
              setKey(envConfig.key || '');
-             // We don't set 'usingEnvVars' to true here, because they evidently failed or we want user to confirm them.
           }
         }
       }
@@ -82,23 +80,20 @@ export const SettingsModal: React.FC<Props> = ({ isOpen, onClose, onNavigateToAd
   };
 
   const schemaSQL = `
--- 1. Setup Extensions (Required for UUID generation)
+-- 1. SETUP EXTENSIONS
 create extension if not exists "uuid-ossp";
 create extension if not exists "pgcrypto";
 
+-- 2. CREATE TABLES
 create table if not exists public.measurements (
   id uuid default gen_random_uuid() primary key,
-  session_id text, -- Link to debug_logs for troubleshooting
-  user_id uuid, -- references auth.users(id) if using auth
+  session_id text,
+  user_id uuid,
   created_at timestamptz default now(),
-  
-  -- Core Fields
   height numeric,
   weight numeric,
   gender text,
   age numeric,
-  
-  -- Measurements
   chest numeric,
   waist numeric,
   hips numeric,
@@ -113,24 +108,25 @@ create table if not exists public.measurements (
   calf numeric,
   ankle numeric,
   torso_length numeric,
-  
-  -- Metadata & Transparency
   confidence numeric,
   model_name text,
   scaling_factor numeric,
   estimated_height_cm numeric,
   capture_method text,
-  
-  -- Full Backup (CRITICAL for Fallback Save)
   full_json jsonb,
   landmarks_json jsonb,
-  
-  -- Usage
   token_count numeric,
   thinking_tokens numeric,
   api_cost_usd numeric,
   thought_summary text
 );
+
+-- Ensure columns exist (migrations)
+alter table public.measurements add column if not exists full_json jsonb;
+alter table public.measurements add column if not exists landmarks_json jsonb;
+alter table public.measurements add column if not exists thinking_tokens numeric;
+alter table public.measurements add column if not exists api_cost_usd numeric;
+alter table public.measurements add column if not exists thought_summary text;
 
 create table if not exists public.measurement_images (
   id uuid default gen_random_uuid() primary key,
@@ -151,65 +147,64 @@ create table if not exists public.measurement_calculations (
   created_at timestamptz default now()
 );
 
--- DEBUG LOGS TABLE (New for Remote Tailing)
 create table if not exists public.debug_logs (
   id uuid default gen_random_uuid() primary key,
   session_id text,
-  level text, -- 'info', 'warn', 'error'
+  level text,
   message text,
   data jsonb,
   device_info jsonb,
   created_at timestamptz default now()
 );
 
--- 2. Enable RLS (Security)
+-- 3. ENABLE SECURITY (RLS)
 alter table public.measurements enable row level security;
 alter table public.measurement_images enable row level security;
 alter table public.measurement_calculations enable row level security;
 alter table public.debug_logs enable row level security;
 
--- 3. Create Policies (Drop first to ensure update)
--- Measurements
-drop policy if exists "Public Insert Measurements" on public.measurements;
-create policy "Public Insert Measurements" on public.measurements for insert with check (true);
+-- 4. POLICIES (Simplified naming to avoid syntax issues)
 
-drop policy if exists "Public Select Measurements" on public.measurements;
-create policy "Public Select Measurements" on public.measurements for select using (true);
+-- Measurements
+drop policy if exists "policy_insert_measurements" on public.measurements;
+create policy "policy_insert_measurements" on public.measurements for insert with check (true);
+
+drop policy if exists "policy_select_measurements" on public.measurements;
+create policy "policy_select_measurements" on public.measurements for select using (true);
 
 -- Images
-drop policy if exists "Public Insert Images" on public.measurement_images;
-create policy "Public Insert Images" on public.measurement_images for insert with check (true);
+drop policy if exists "policy_insert_images" on public.measurement_images;
+create policy "policy_insert_images" on public.measurement_images for insert with check (true);
 
-drop policy if exists "Public Select Images" on public.measurement_images;
-create policy "Public Select Images" on public.measurement_images for select using (true);
+drop policy if exists "policy_select_images" on public.measurement_images;
+create policy "policy_select_images" on public.measurement_images for select using (true);
 
 -- Calculations
-drop policy if exists "Public Insert Calcs" on public.measurement_calculations;
-create policy "Public Insert Calcs" on public.measurement_calculations for insert with check (true);
+drop policy if exists "policy_insert_calcs" on public.measurement_calculations;
+create policy "policy_insert_calcs" on public.measurement_calculations for insert with check (true);
 
-drop policy if exists "Public Select Calcs" on public.measurement_calculations for select using (true);
+drop policy if exists "policy_select_calcs" on public.measurement_calculations;
+create policy "policy_select_calcs" on public.measurement_calculations for select using (true);
 
 -- Debug Logs
-drop policy if exists "Public Insert Logs" on public.debug_logs;
-create policy "Public Insert Logs" on public.debug_logs for insert with check (true);
+drop policy if exists "policy_insert_logs" on public.debug_logs;
+create policy "policy_insert_logs" on public.debug_logs for insert with check (true);
 
-drop policy if exists "Public Select Logs" on public.debug_logs;
-create policy "Public Select Logs" on public.debug_logs for select using (true);
+drop policy if exists "policy_select_logs" on public.debug_logs;
+create policy "policy_select_logs" on public.debug_logs for select using (true);
 
--- 4. Create Storage Bucket for Images
+-- 5. STORAGE SETUP
 insert into storage.buckets (id, name, public) 
 values ('scans', 'scans', true)
 on conflict (id) do nothing;
 
--- 5. Storage Policies
-drop policy if exists "Public Upload Scans" on storage.objects;
-create policy "Public Upload Scans" on storage.objects for insert with check ( bucket_id = 'scans' );
+drop policy if exists "policy_upload_scans" on storage.objects;
+create policy "policy_upload_scans" on storage.objects for insert with check ( bucket_id = 'scans' );
 
-drop policy if exists "Public Select Scans" on storage.objects;
-create policy "Public Select Scans" on storage.objects for select using ( bucket_id = 'scans' );
+drop policy if exists "policy_select_scans" on storage.objects;
+create policy "policy_select_scans" on storage.objects for select using ( bucket_id = 'scans' );
 
--- 6. Analytics Views
--- Drop first to ensure fresh creation without SECURITY DEFINER (default is INVOKER, which fixes linter error)
+-- 6. VIEWS (Analytics)
 drop view if exists public.measurements_with_concerns;
 create view public.measurements_with_concerns as
 select 
@@ -309,9 +304,9 @@ group by model_name;
               {usingEnvVars ? (
                 <div className="bg-blue-50 p-4 rounded-lg border border-blue-200 mb-4 text-center">
                   <Shield size={24} className="mx-auto text-blue-600 mb-2" />
-                  <p className="text-sm text-blue-800 font-bold">Using Environment Variables</p>
+                  <p className="text-sm text-blue-800 font-bold">Automatic Configuration</p>
                   <p className="text-xs text-blue-600 mt-1">
-                    Supabase configuration is loaded securely from your Vercel/System environment.
+                    Supabase configuration is loaded from your Environment Variables or Defaults.
                   </p>
                   <button 
                     type="button" 
