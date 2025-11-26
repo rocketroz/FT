@@ -1,3 +1,4 @@
+
 import { createClient, SupabaseClient, User, Session } from '@supabase/supabase-js';
 import { UserStats, MeasurementResult } from '../types';
 import { logger } from './logger';
@@ -253,6 +254,8 @@ const uploadImage = async (userId: string, imageBase64: string, type: 'front' | 
 
     const fileName = `${userId}/${Date.now()}_${type}.jpg`;
     
+    console.log(`[Supabase] Uploading ${type} image to ${fileName}...`);
+
     const { data, error } = await supabase.storage
       .from('scans')
       .upload(fileName, blob, {
@@ -262,6 +265,7 @@ const uploadImage = async (userId: string, imageBase64: string, type: 'front' | 
 
     if (error) {
       console.error("Upload error details:", error);
+      // Don't fail the whole save if just image upload fails
       return null;
     }
 
@@ -283,7 +287,6 @@ export const saveScanResult = async (
   if (!supabase && !initSupabase()) return { success: false, error: { message: "Database not connected" } };
 
   try {
-    // Debug logging
     // @ts-ignore
     const projectUrl = supabase['supabaseUrl'];
     console.log(`[Supabase] Saving scan to project: ${projectUrl}`);
@@ -292,17 +295,11 @@ export const saveScanResult = async (
     const sessionId = logger.getSessionId();
 
     // 1. Upload Images
-    console.log("[Supabase] Uploading images...");
     const frontUrl = await uploadImage(user ? user.id : 'anon', images.front, 'front');
     const sideUrl = await uploadImage(user ? user.id : 'anon', images.side, 'side');
 
-    if (!frontUrl && !sideUrl) {
-      console.warn("[Supabase] Image upload failed, likely due to storage permission or bucket missing. Proceeding with data save.");
-    }
-
     // 2. Save Main Record
     console.log("[Supabase] Inserting measurement record...");
-    // Explicitly generate ID here to avoid issues if the DB table was created without 'default gen_random_uuid()'
     const measurementId = generateUUID();
 
     const insertResult = await supabase!
@@ -332,6 +329,7 @@ export const saveScanResult = async (
         
         token_count: results.usage_metadata?.totalTokenCount || results.token_count,
         thinking_tokens: results.usage_metadata?.thinkingTokenCount,
+        api_cost_usd: results.api_cost_usd,
         
         // Full JSON Backup
         full_json: results,
@@ -390,13 +388,7 @@ export const saveScanResult = async (
 
     // Final cleanup if stringify resulted in unhelpful strings
     if (!errorMessage || errorMessage === '[object Object]' || errorMessage === '{}') {
-       try {
-         // Last resort: standard stringify
-         errorMessage = JSON.stringify(error);
-         if (errorMessage === '{}') errorMessage = "Unknown system error (empty object). Check network tab.";
-       } catch (e) {
-         errorMessage = "Critical: Unknown error occurred (unserializable).";
-       }
+         errorMessage = "Database Error: Check console logs for details.";
     }
 
     return { 
@@ -419,6 +411,5 @@ export const getScans = async (limit = 20): Promise<any[]> => {
     console.error("Get Scans Error:", error);
     return [];
   }
-  // Safe return - explicitly return empty array if null
   return data || [];
 };
