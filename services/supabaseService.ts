@@ -1,4 +1,3 @@
-
 import { createClient, SupabaseClient, User, Session } from '@supabase/supabase-js';
 import { UserStats, MeasurementResult } from '../types';
 import { logger } from './logger';
@@ -329,7 +328,6 @@ export const saveScanResult = async (
         
         token_count: results.usage_metadata?.totalTokenCount || results.token_count,
         thinking_tokens: results.usage_metadata?.thinkingTokenCount,
-        api_cost_usd: results.api_cost_usd,
         
         // Full JSON Backup
         full_json: results,

@@ -1,4 +1,3 @@
-
 import { GoogleGenAI, Type, Schema } from "@google/genai";
 import { UserStats, MeasurementResult } from "../types";
 
@@ -21,37 +20,13 @@ let aiInstance: GoogleGenAI | null = null;
 const getAI = () => {
   if (!aiInstance) {
     const apiKey = getApiKey();
-    // In Demo/Dev mode, it's acceptable for the key to be missing initially if we want to trigger mock logic,
-    // but here we are designing for the 'real' flow or a graceful failure.
+    if (!apiKey) {
+      console.error("Gemini API Key is missing. Check your environment variables (API_KEY or VITE_API_KEY).");
+      // Fallback or let it throw naturally from SDK if desired, but explicit error is better
+    }
     aiInstance = new GoogleGenAI({ apiKey: apiKey || '' });
   }
   return aiInstance;
-};
-
-// --- Cost Estimation Helper ---
-const estimateCost = (model: string, inputTokens: number, outputTokens: number): number => {
-  // Pricing approximations (USD per 1M tokens)
-  let inputRate = 0;
-  let outputRate = 0;
-
-  if (model.includes('flash')) {
-    // Gemini 1.5/2.5 Flash
-    inputRate = 0.075;
-    outputRate = 0.30;
-  } else {
-    // Gemini 1.5 Pro / 3 Pro (Preview assumed similar tier)
-    inputRate = 1.25; // < 128k prompt
-    outputRate = 5.00;
-  }
-
-  const inputCost = (inputTokens / 1_000_000) * inputRate;
-  const outputCost = (outputTokens / 1_000_000) * outputRate;
-  
-  // Basic image cost approximation (if images were tokens, they are accounted for in inputTokens by the API usually,
-  // but if billed separately, standard is approx $0.0025/image for Pro).
-  // The API `promptTokenCount` usually includes image tokens, so we rely on that.
-  
-  return inputCost + outputCost;
 };
 
 export const analyzeApplicationLogs = async (logs: any[]): Promise<string> => {
@@ -73,11 +48,6 @@ export const analyzeApplicationLogs = async (logs: any[]): Promise<string> => {
 
   try {
     const ai = getAI();
-    // Check if key exists before call to avoid hard crash if we want to support a "Demo Mode" fallback locally
-    if (!aiInstance?.apiKey && !getApiKey()) {
-       return "Demo Mode: Logs analysis simulated. No API Key found.";
-    }
-
     const response = await ai.models.generateContent({
       model: 'gemini-3-pro-preview',
       contents: prompt
@@ -88,44 +58,6 @@ export const analyzeApplicationLogs = async (logs: any[]): Promise<string> => {
   }
 };
 
-// --- MOCK DATA FOR DEMO MODE ---
-// Used when no API Key is present to allow UI testing.
-const MOCK_MEASUREMENT_RESULT: MeasurementResult = {
-  chest: 102,
-  waist: 85,
-  hips: 98,
-  shoulder: 46,
-  sleeve: 62,
-  neck: 39,
-  bicep: 34,
-  wrist: 17,
-  inseam: 81,
-  outseam: 104,
-  thigh: 58,
-  calf: 39,
-  ankle: 26,
-  torso_length: 52,
-  confidence: 88,
-  notes: "DEMO MODE: Simulating analysis. Subject appears to have an athletic build with broad shoulders. Posture is upright.",
-  body_shape: "Inverted Triangle",
-  model_name: "DEMO-MODE",
-  scaling_factor: 1.05,
-  estimated_height_cm: 176,
-  thought_summary: "No API Key detected. Using procedural generation for demonstration purposes. Randomized jitter applied to simulate live variations.",
-  token_count: 0,
-  api_cost_usd: 0,
-  quality_assessment: {
-    overall_score: 9,
-    front_image_quality: 9,
-    side_image_quality: 8,
-    pose_consistency: 10,
-    lighting_quality: 8,
-    issues_detected: []
-  },
-  landmarks_front: {},
-  landmarks_side: {}
-};
-
 export const analyzeBodyMeasurements = async (
   frontImageBase64: string,
   sideImageBase64: string,
@@ -133,28 +65,6 @@ export const analyzeBodyMeasurements = async (
   modelId: string = "gemini-3-pro-preview"
 ): Promise<MeasurementResult> => {
   
-  // 1. Check for API Key - Fallback to Demo Mode if missing
-  const apiKey = getApiKey();
-  if (!apiKey) {
-    console.warn("No API Key found. Returning MOCK data.");
-    await new Promise(resolve => setTimeout(resolve, 1500)); // Simulate network latency
-    
-    // Add realistic jitter based on height
-    const scaleRatio = stats.height / 180; 
-    const variance = (base: number, range: number = 2.0) => {
-       return Math.round(((base * scaleRatio) + (Math.random() * range - range/2)) * 10) / 10;
-    };
-
-    return {
-      ...MOCK_MEASUREMENT_RESULT,
-      chest: variance(102),
-      waist: variance(85),
-      hips: variance(98),
-      inseam: variance(81),
-      estimated_height_cm: variance(stats.height, 1)
-    };
-  }
-
   const prompt = `
     You are an expert anthropometrist and technical tailor. 
     Analyze the attached TWO images (Front & Side) to calculate precise body measurements.
@@ -379,13 +289,6 @@ export const analyzeBodyMeasurements = async (
             thinkingTokenCount: response.usageMetadata.thinkingTokenCount
           };
           result.token_count = response.usageMetadata.totalTokenCount;
-
-          // Calculate and attach estimated cost
-          result.api_cost_usd = estimateCost(
-            modelId, 
-            response.usageMetadata.promptTokenCount, 
-            response.usageMetadata.candidatesTokenCount
-          );
         }
 
         // --- Persist model ID in the result object ---

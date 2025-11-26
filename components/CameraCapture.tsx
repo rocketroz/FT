@@ -11,10 +11,13 @@ interface Props {
 
 const SHUTTER_SOUND = "data:audio/wav;base64,UklGRi5AAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQBAAAAA/v///wAAAAAAAAAAAA==";
 
-// Path definitions extracted for reuse in AR Mask and Reference Guides
-const PATH_FRONT = "M50 12 C56 12 60 16 60 22 C60 28 57 30 55 32 L82 62 L75 70 L58 52 L56 85 L62 190 L48 190 L46 100 L44 85 L42 85 L40 100 L38 190 L24 190 L30 85 L28 52 L11 70 L5 62 L31 32 C29 30 26 28 26 22 C26 16 30 12 36 12 C40 12 46 12 50 12 Z";
-const PATH_SIDE = "M50 12 C55 12 58 16 58 22 C58 28 56 30 54 32 C58 36 60 45 58 60 C56 75 54 85 54 95 L56 140 L58 190 L40 190 L42 140 L44 95 L44 60 C42 45 40 36 40 32 C38 30 36 28 36 22 C36 16 40 12 46 12 Z";
-const PATH_SIDE_ARM = "M48 32 L52 32 L54 60 L52 80 L48 80 L46 60 Z";
+// Flat 2D "Ghost" Silhouette (No Perspective, Proportional Scaling)
+const PATH_FRONT = "M50 10 A 11 11 0 1 1 50 32 A 11 11 0 1 1 50 10 Z M32 40 L68 40 L85 85 L78 88 L62 60 L62 95 L64 185 L54 185 L53 105 L47 105 L46 185 L36 185 L38 95 L38 60 L22 88 L15 85 Z";
+
+// Side view - symmetric/generic profile (facing either way)
+// Centered at x=50. Symmetric shape representing side profile thickness without directional features like nose/feet direction.
+const PATH_SIDE = "M50 10 Q62 10 62 22 Q62 34 56 37 L58 42 Q64 50 62 75 Q61 110 61 120 L59 185 L62 192 L38 192 L41 185 L39 120 Q39 110 38 75 Q36 50 42 42 L44 37 Q38 34 38 22 Q38 10 50 10 Z";
+const PATH_SIDE_ARM = "M47 45 L53 45 L54 105 L46 105 Z";
 
 export const CameraCapture: React.FC<Props> = ({ onCapture, onBack, mode }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -405,8 +408,7 @@ export const CameraCapture: React.FC<Props> = ({ onCapture, onBack, mode }) => {
   const MannequinFront = () => (
     <g>
       <path d={PATH_FRONT} fill="#94a3b8" />
-      <line x1="43" y1="12" x2="43" y2="190" stroke="#f97316" strokeWidth="1" strokeDasharray="4 2" />
-      <line x1="31" y1="32" x2="55" y2="32" stroke="#cbd5e1" strokeWidth="0.5" />
+      <line x1="50" y1="10" x2="50" y2="190" stroke="#f97316" strokeWidth="1" strokeDasharray="4 2" />
     </g>
   );
 
@@ -414,7 +416,7 @@ export const CameraCapture: React.FC<Props> = ({ onCapture, onBack, mode }) => {
     <g>
       <path d={PATH_SIDE} fill="#94a3b8" />
       <path d={PATH_SIDE_ARM} fill="#64748b" />
-      <line x1="49" y1="12" x2="49" y2="190" stroke="#f97316" strokeWidth="1" strokeDasharray="4 2" />
+      <line x1="50" y1="12" x2="50" y2="190" stroke="#f97316" strokeWidth="1" strokeDasharray="4 2" />
     </g>
   );
 
@@ -490,22 +492,24 @@ export const CameraCapture: React.FC<Props> = ({ onCapture, onBack, mode }) => {
                   className={`absolute inset-0 w-full h-full object-cover ${facingMode === 'user' ? 'scale-x-[-1]' : ''}`}
                 />
                 
-                {/* AR Mask Overlay */}
+                {/* AR Mask Overlay - "Positive" Ghost Style */}
                 <div className="absolute inset-0 pointer-events-none">
-                  <svg className="w-full h-full" viewBox="0 0 100 200" preserveAspectRatio="none">
-                    <path
-                      d={`M0 0 H100 V200 H0 Z ${mode === 'front' ? PATH_FRONT : PATH_SIDE}`}
-                      fill="rgba(0, 0, 0, 0.65)" 
-                      fillRule="evenodd"
-                    />
+                  <svg className="w-full h-full" viewBox="0 0 100 200" preserveAspectRatio="xMidYMid meet">
                     <path 
                       d={mode === 'front' ? PATH_FRONT : PATH_SIDE}
-                      fill="none" 
-                      stroke="white" 
+                      fill="rgba(255, 255, 255, 0.25)" 
+                      stroke="rgba(255, 255, 255, 0.9)" 
                       strokeWidth="0.8"
-                      strokeDasharray="4 2"
-                      className="drop-shadow-md"
+                      className="drop-shadow-lg"
                     />
+                    {mode === 'side' && (
+                       <path 
+                         d={PATH_SIDE_ARM} 
+                         fill="rgba(255, 255, 255, 0.25)" 
+                         stroke="rgba(255, 255, 255, 0.9)" 
+                         strokeWidth="0.8" 
+                       />
+                    )}
                   </svg>
                 </div>
 
@@ -611,7 +615,7 @@ export const CameraCapture: React.FC<Props> = ({ onCapture, onBack, mode }) => {
                <h3 className="text-xl font-bold text-white mb-4 text-center">How to Capture</h3>
                <div className="flex justify-center mb-6">
                   <div className="w-32 h-48 bg-slate-800 rounded-lg p-2 border border-slate-700">
-                     <svg viewBox="0 0 86 200" className="w-full h-full">
+                     <svg viewBox="0 0 100 200" className="w-full h-full" preserveAspectRatio="xMidYMid meet">
                         {mode === 'front' ? <MannequinFront /> : <MannequinSide />}
                      </svg>
                   </div>

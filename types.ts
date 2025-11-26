@@ -88,8 +88,7 @@ export interface MeasurementResult {
   scaling_factor?: number; // pixels per cm
   estimated_height_cm?: number; // AI's independent estimate
   thought_summary?: string; // Natural language reasoning
-  token_count?: number;
-  api_cost_usd?: number; // Estimated cost of the API call
+  token_count?: number; 
   
   // Explicit Landmark Sets
   landmarks_front?: LandmarkSet;
