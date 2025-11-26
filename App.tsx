@@ -312,6 +312,7 @@ const App: React.FC = () => {
           <div className="w-full animate-fade-in">
             <CameraCapture 
               mode="side"
+              initialFacingMode={frontMeta?.facingMode === 'user' ? 'user' : 'environment'}
               onCapture={handleSideCapture} 
               onBack={() => {
                 setFrontImage(null);

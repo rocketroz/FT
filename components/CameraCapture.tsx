@@ -7,6 +7,7 @@ interface Props {
   onCapture: (imageBase64: string, metadata: CaptureMetadata) => void;
   onBack: () => void;
   mode: 'front' | 'side';
+  initialFacingMode?: 'user' | 'environment';
 }
 
 const SHUTTER_SOUND = "data:audio/wav;base64,UklGRi5AAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQBAAAAA/v///wAAAAAAAAAAAA==";
@@ -19,7 +20,7 @@ const PATH_FRONT = "M50 10 A 11 11 0 1 1 50 32 A 11 11 0 1 1 50 10 Z M32 40 L68 
 const PATH_SIDE = "M50 10 Q62 10 62 22 Q62 34 56 37 L58 42 Q64 50 62 75 Q61 110 61 120 L59 185 L62 192 L38 192 L41 185 L39 120 Q39 110 38 75 Q36 50 42 42 L44 37 Q38 34 38 22 Q38 10 50 10 Z";
 const PATH_SIDE_ARM = "M47 45 L53 45 L54 105 L46 105 Z";
 
-export const CameraCapture: React.FC<Props> = ({ onCapture, onBack, mode }) => {
+export const CameraCapture: React.FC<Props> = ({ onCapture, onBack, mode, initialFacingMode = 'environment' }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -32,7 +33,7 @@ export const CameraCapture: React.FC<Props> = ({ onCapture, onBack, mode }) => {
   const autoStartTriggeredRef = useRef(false);
 
   const [captureMethod, setCaptureMethod] = useState<'camera' | 'upload'>('camera');
-  const [facingMode, setFacingMode] = useState<'user' | 'environment'>('environment');
+  const [facingMode, setFacingMode] = useState<'user' | 'environment'>(initialFacingMode);
   const [stream, setStream] = useState<MediaStream | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isCameraReady, setIsCameraReady] = useState(false);
